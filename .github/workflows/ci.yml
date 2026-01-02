@@ -1,0 +1,174 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "main"
+
+permissions: {}
+
+jobs:
+  test:
+    if: ${{ github.repository }} == 'egibs/reconcile'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      image: cgr.dev/chainguard/wolfi-base:latest
+      options: >-
+        --cap-add DAC_OVERRIDE
+        --cap-add SETGID
+        --cap-add SETUID
+        --cap-drop ALL
+        --cgroupns private
+        --cpu-shares=4096
+        --memory-swappiness=0
+        --security-opt no-new-privileges
+        --ulimit core=0
+        --ulimit nofile=65535:65535
+        --ulimit nproc=65535:65535
+    steps:
+      - name: Install dependencies
+        run: |
+          apk update; apk add curl findutils git go nodejs
+
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+
+      - name: Trust repository
+        run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
+      - name: Run Tests
+        run: |
+          make test
+
+  bench:
+    if: ${{ github.repository }} == 'egibs/reconcile'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      image: cgr.dev/chainguard/wolfi-base:latest
+      options: >-
+        --cap-add DAC_OVERRIDE
+        --cap-add SETGID
+        --cap-add SETUID
+        --cap-drop ALL
+        --cgroupns private
+        --cpu-shares=4096
+        --memory-swappiness=0
+        --security-opt no-new-privileges
+        --ulimit core=0
+        --ulimit nofile=65535:65535
+        --ulimit nproc=65535:65535
+    steps:
+      - name: Install dependencies
+        run: |
+          apk update; apk add curl findutils git go nodejs
+
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+
+      - name: Trust repository
+        run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
+      - name: Run Benchmarks
+        run: |
+          make bench
+
+  lint:
+    if: ${{ github.repository }} == 'egibs/reconcile'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        target: ["golangci-lint-lint", "gosec", "modernize", "osv", "vet"]
+    container:
+      image: cgr.dev/chainguard/wolfi-base:latest
+      options: >-
+        --cap-add DAC_OVERRIDE
+        --cap-add SETGID
+        --cap-add SETUID
+        --cap-drop ALL
+        --cgroupns private
+        --cpu-shares=4096
+        --memory-swappiness=0
+        --security-opt no-new-privileges
+        --ulimit core=0
+        --ulimit nofile=65535:65535
+        --ulimit nproc=65535:65535
+    steps:
+      - name: Install dependencies
+        run: |
+          apk update; apk add curl findutils git go nodejs
+
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+
+      - name: Trust repository
+        run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
+      - name: Run make ${{ matrix.target }}
+        env:
+          GOROOT: "/usr/lib/go"
+          GOPATH: "/usr/lib/go"
+        run: |
+          make ${{ matrix.target }}
+
+  fuzz:
+    if: ${{ github.repository }} == 'egibs/reconcile'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          [
+            "FuzzDiff",
+            "FuzzEmbedded",
+            "FuzzEqual",
+            "FuzzScript",
+            "FuzzSoname",
+            "FuzzSuffix",
+          ]
+    container:
+      image: cgr.dev/chainguard/wolfi-base:latest
+      options: >-
+        --cap-add DAC_OVERRIDE
+        --cap-add SETGID
+        --cap-add SETUID
+        --cap-drop ALL
+        --cgroupns private
+        --cpu-shares=4096
+        --memory-swappiness=0
+        --security-opt no-new-privileges
+        --ulimit core=0
+        --ulimit nofile=65535:65535
+        --ulimit nproc=65535:65535
+    steps:
+      - name: Install dependencies
+        run: |
+          apk update; apk add curl findutils git go nodejs
+
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+
+      - name: Trust repository
+        run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
+      - name: Run ${{ matrix.test }}
+        run: |
+          GOEXPERIMENT=greenteagc go test --fuzz=${{ matrix.test }} -run=${{ matrix.test }} -fuzztime=60s ./pkg/diff
