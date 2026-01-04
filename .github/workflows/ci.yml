@@ -171,4 +171,4 @@ jobs:
 
       - name: Run ${{ matrix.test }}
         run: |
-          GOEXPERIMENT=greenteagc go test --fuzz=${{ matrix.test }} -run=${{ matrix.test }} -fuzztime=60s ./pkg/diff
+          GOEXPERIMENT=greenteagc go test --fuzz=${{ matrix.test }} -run=${{ matrix.test }} -fuzztime=60s ./pkg/files

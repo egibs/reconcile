@@ -23,12 +23,12 @@ go get github.com/egibs/reconcile@latest
 ```
 
 ```go
-import "github.com/egibs/reconcile"
+import "github.com/egibs/reconcile/pkg/files"
 
 srcPaths := []string{"foo.txt", "bar.txt"}
 destPaths := []string{"baz.txt", "another_file"}
 
-result := reconcile.Diff(srcPaths, destPaths)
+result := files.Diff(srcPaths, destPaths)
 ```
 
 ## Stages
