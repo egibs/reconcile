@@ -1,4 +1,4 @@
-package diff
+package files
 
 import (
 	"fmt"
@@ -77,7 +77,7 @@ func TestHash_DifferentIdentity(t *testing.T) {
 	}
 }
 
-func TestIdEq(t *testing.T) {
+func TestEqual(t *testing.T) {
 	cases := []struct {
 		a, b string
 		want bool
@@ -236,7 +236,7 @@ func BenchmarkSoname(b *testing.B) {
 	}
 }
 
-func BenchmarkApkscript(b *testing.B) {
+func BenchmarkScript(b *testing.B) {
 	paths := [][]byte{
 		[]byte("alpine-baselayout-3.6.8-r1.Q17OteNVXn9iSXcJI1Vf8x0TVc9Y.post-install"),
 		[]byte("busybox-1.37.0-r12.Q1sSNCl4MTQ0d1V0NTXAhIjY7Nqo.trigger"),
@@ -293,7 +293,7 @@ func BenchmarkSpans(b *testing.B) {
 	}
 }
 
-func BenchmarkIdEq(b *testing.B) {
+func BenchmarkEqual(b *testing.B) {
 	pairs := [][2]string{
 		{"lib/libcrypto.so.1.1.0", "lib/libcrypto.so.3.0.0"},
 		{"alpine-baselayout-3.6.8-r1.Q17OteNVXn9.post-install", "alpine-baselayout-3.7.0-r0.Q1KfmXSO6h.post-install"},

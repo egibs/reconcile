@@ -72,11 +72,12 @@ _lint: $(LINTERS)
 
 # use a smaller value for local runs since CI runs each fuzzer for 60 seconds
 FUZZ_TIME := 10s
+PKG_DIR := ./pkg/files
 .PHONY: fuzz
 fuzz:
-	$(GOEXP) go test --fuzz=FuzzDiff -run=FuzzDiff -fuzztime=$(FUZZ_TIME) ./pkg/diff
-	$(GOEXP) go test --fuzz=FuzzEqual -run=FuzzEqual -fuzztime=$(FUZZ_TIME) ./pkg/diff
-	$(GOEXP) go test --fuzz=FuzzSoname -run=FuzzSoname -fuzztime=$(FUZZ_TIME) ./pkg/diff
-	$(GOEXP) go test --fuzz=FuzzScript -run=FuzzScript -fuzztime=$(FUZZ_TIME) ./pkg/diff
-	$(GOEXP) go test --fuzz=FuzzSuffix -run=FuzzSuffix -fuzztime=$(FUZZ_TIME) ./pkg/diff
-	$(GOEXP) go test --fuzz=FuzzEmbedded -run=FuzzEmbedded -fuzztime=$(FUZZ_TIME) ./pkg/diff
+	$(GOEXP) go test --fuzz=FuzzDiff -run=FuzzDiff -fuzztime=$(FUZZ_TIME) $(PKG_DIR)
+	$(GOEXP) go test --fuzz=FuzzEqual -run=FuzzEqual -fuzztime=$(FUZZ_TIME) $(PKG_DIR)
+	$(GOEXP) go test --fuzz=FuzzSoname -run=FuzzSoname -fuzztime=$(FUZZ_TIME) $(PKG_DIR)
+	$(GOEXP) go test --fuzz=FuzzScript -run=FuzzScript -fuzztime=$(FUZZ_TIME) $(PKG_DIR)
+	$(GOEXP) go test --fuzz=FuzzSuffix -run=FuzzSuffix -fuzztime=$(FUZZ_TIME) $(PKG_DIR)
+	$(GOEXP) go test --fuzz=FuzzEmbedded -run=FuzzEmbedded -fuzztime=$(FUZZ_TIME) $(PKG_DIR)
