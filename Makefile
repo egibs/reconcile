@@ -74,10 +74,6 @@ _lint: $(LINTERS)
 FUZZ_TIME := 10s
 PKG_DIR := ./pkg/files
 .PHONY: fuzz
+FUZZERS = FuzzDiffConcurrent FuzzDiffMain FuzzDiffMulti FuzzEmbedded FuzzEqual FuzzHashAll FuzzHashSerial FuzzResultIterator FuzzScript FuzzSoname FuzzSuffix FuzzTryMarkConcurrent FuzzTryMarkSerial
 fuzz:
-	$(GOEXP) go test --fuzz=FuzzDiff -run=FuzzDiff -fuzztime=$(FUZZ_TIME) $(PKG_DIR)
-	$(GOEXP) go test --fuzz=FuzzEqual -run=FuzzEqual -fuzztime=$(FUZZ_TIME) $(PKG_DIR)
-	$(GOEXP) go test --fuzz=FuzzSoname -run=FuzzSoname -fuzztime=$(FUZZ_TIME) $(PKG_DIR)
-	$(GOEXP) go test --fuzz=FuzzScript -run=FuzzScript -fuzztime=$(FUZZ_TIME) $(PKG_DIR)
-	$(GOEXP) go test --fuzz=FuzzSuffix -run=FuzzSuffix -fuzztime=$(FUZZ_TIME) $(PKG_DIR)
-	$(GOEXP) go test --fuzz=FuzzEmbedded -run=FuzzEmbedded -fuzztime=$(FUZZ_TIME) $(PKG_DIR)
+	$(foreach f,$(FUZZERS),$(GOEXP) go test --fuzz=$(f) -run=$(f) -fuzztime=$(FUZZ_TIME) $(PKG_DIR);)
