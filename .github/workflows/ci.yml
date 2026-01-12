@@ -135,12 +135,19 @@ jobs:
       matrix:
         test:
           [
-            "FuzzDiff",
+            "FuzzDiffConcurrent",
+            "FuzzDiffMain",
+            "FuzzDiffMulti",
             "FuzzEmbedded",
             "FuzzEqual",
+            "FuzzHashAll",
+            "FuzzHashSerial",
+            "FuzzResultIterator",
             "FuzzScript",
             "FuzzSoname",
             "FuzzSuffix",
+            "FuzzTryMarkConcurrent",
+            "FuzzTryMarkSerial",
           ]
     container:
       image: cgr.dev/chainguard/wolfi-base:latest
