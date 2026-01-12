@@ -94,7 +94,7 @@ func diffP(old, cur []string, workers int) *Result {
 	results := make([][]Entry, workers)                // Per-worker reconciliation results
 	counts := make([][3]uint32, workers)               // Per-worker statuses excluding Additions which are handled separately
 
-	chunk = max(1, (newFiles+workers-1)/workers)
+	chunk = max(1, (oldFiles+workers-1)/workers)
 
 	for worker := range workers {
 		low := worker * chunk
