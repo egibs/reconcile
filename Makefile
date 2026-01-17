@@ -8,6 +8,10 @@ clean:
 test: clean
 	$(GOEXP) go test -v -race ./...
 
+.PHONY: test-win
+test-win: clean
+	$(GOEXP) go test -v ./...
+
 .PHONY: bench
 bench: clean
 	$(GOEXP) go test -v -run=^\$$ -bench=. ./... -benchmem
@@ -46,7 +50,7 @@ install-gosec:
 LINTERS += gosec
 .PHONY: gosec
 gosec: install-gosec
-	$$GOPATH/bin/gosec -conf .gosec.json ./...
+	gosec -conf .gosec.json ./...
 
 LINTERS += vet
 .PHONY: vet
@@ -65,7 +69,7 @@ install-osv:
 LINTERS += osv
 .PHONY: osv
 osv: install-osv
-	$$GOPATH/bin/osv-scanner scan source -r --format json ./
+	osv-scanner scan source -r --format json ./
 
 .PHONY: _lint $(LINTERS)
 _lint: $(LINTERS)
