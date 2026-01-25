@@ -8,6 +8,7 @@ import (
 	"testing/synctest"
 
 	"github.com/egibs/reconcile/internal/identity"
+	"go.uber.org/goleak"
 )
 
 // testHash is a helper for tests that need to call hash directly.
@@ -400,4 +401,8 @@ func TestEmbedded(t *testing.T) {
 				tt.input, gotI, gotJ, tt.wantI, tt.wantJ)
 		}
 	}
+}
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
 }
