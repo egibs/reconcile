@@ -43,6 +43,7 @@ jobs:
         with:
           go-version-file: "go.mod"
           check-latest: true
+          cache: true
 
       - name: Run Tests
         if: runner.os != 'Windows'
@@ -86,6 +87,7 @@ jobs:
         with:
           go-version-file: "go.mod"
           check-latest: true
+          cache: true
 
       - name: Run Benchmarks
         run: |
@@ -115,6 +117,7 @@ jobs:
         with:
           go-version-file: "go.mod"
           check-latest: true
+          cache: true
 
       - name: Run make ${{ matrix.target }}
         run: |
@@ -168,13 +171,14 @@ jobs:
         with:
           go-version-file: "go.mod"
           check-latest: true
+          cache: true
 
       - name: Run ${{ matrix.test }}
         if: runner.os != 'Windows'
         run: |
-          GOEXPERIMENT=greenteagc go test --fuzz=${{ matrix.test }} -run=${{ matrix.test }} -fuzztime=10s ./pkg/files
+          GOEXPERIMENT=greenteagc go test -parallel=1 --fuzz=${{ matrix.test }} -run=${{ matrix.test }} -fuzztime=10s ./pkg/files
 
       - name: Run ${{ matrix.test }} (Windows)
         if: runner.os == 'Windows'
         run: |
-          set "GOEXPERIMENT=greenteagc" & go test --fuzz=${{ matrix.test }} -run=${{ matrix.test }} -fuzztime=10s ./pkg/files
+          set "GOEXPERIMENT=greenteagc" & go test -parallel=1 --fuzz=${{ matrix.test }} -run=${{ matrix.test }} -fuzztime=10s ./pkg/files
