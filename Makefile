@@ -80,4 +80,4 @@ PKG_DIR := ./pkg/files
 .PHONY: fuzz
 FUZZERS = FuzzDiffConcurrent FuzzDiffMain FuzzDiffMulti FuzzEmbedded FuzzEqual FuzzHashAll FuzzHashSerial FuzzResultIterator FuzzScript FuzzSoname FuzzSuffix FuzzTryMarkConcurrent FuzzTryMarkSerial
 fuzz:
-	$(foreach f,$(FUZZERS),$(GOEXP) go test --fuzz=$(f) -run=$(f) -fuzztime=$(FUZZ_TIME) $(PKG_DIR);)
+	$(foreach f,$(FUZZERS),$(GOEXP) go test -parallel=1 --fuzz=$(f) -run=$(f) -fuzztime=$(FUZZ_TIME) $(PKG_DIR);)
