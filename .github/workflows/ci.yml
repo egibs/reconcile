@@ -29,7 +29,7 @@ jobs:
             "windows-latest",
           ]
     steps:
-      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+      - uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -78,7 +78,7 @@ jobs:
             "windows-latest",
           ]
     steps:
-      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+      - uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -113,7 +113,7 @@ jobs:
       matrix:
         target: ["golangci-lint-lint", "gosec", "modernize", "osv", "vet"]
     steps:
-      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+      - uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -176,7 +176,7 @@ jobs:
             "FuzzTryMarkSerial",
           ]
     steps:
-      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+      - uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
         with:
           egress-policy: block
           allowed-endpoints: >
