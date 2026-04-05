@@ -1,5 +1,5 @@
 module github.com/egibs/reconcile
 
-go 1.25.7
+go 1.26.1
 
 require go.uber.org/goleak v1.3.0
