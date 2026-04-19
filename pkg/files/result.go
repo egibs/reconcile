@@ -21,7 +21,7 @@ const (
 type Entry struct {
 	Old    uint32
 	New    uint32
-	Status uint32
+	Status Status
 }
 
 // Result contains the final reconciliation output for a collection of old and new files.
@@ -37,8 +37,7 @@ func (r *Result) Count(s Status) uint32 { return r.C[s].Load() }
 func (r *Result) All() iter.Seq2[Status, Entry] {
 	return func(yield func(Status, Entry) bool) {
 		for _, e := range r.E {
-			// #nosec G115
-			if !yield(Status(e.Status&0xFF), e) {
+			if !yield(e.Status, e) {
 				return
 			}
 		}
@@ -49,8 +48,7 @@ func (r *Result) All() iter.Seq2[Status, Entry] {
 func (r *Result) Filter(s Status) iter.Seq[Entry] {
 	return func(yield func(Entry) bool) {
 		for _, e := range r.E {
-			// #nosec G115
-			if Status(e.Status&0xFF) == s {
+			if e.Status == s {
 				if !yield(e) {
 					return
 				}

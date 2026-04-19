@@ -2,6 +2,7 @@ package files
 
 import (
 	"hash/maphash"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -137,9 +138,8 @@ func FuzzDiffMulti(f *testing.F) {
 
 // FuzzDiffConcurrent tests reconciliation under concurrent execution
 // to catch race conditions in sharding and bitset operations.
-// Note: Results may differ when inputs contain duplicate identities due to
-// non-deterministic worker ordering in map construction.
-// Each result is verified separately rather than across calls.
+// Each result is verified for correctness invariants independently.
+// For determinism guarantees across calls, see TestDiffRace2Determinism.
 func FuzzDiffConcurrent(f *testing.F) {
 	f.Add("a-1.0\nb-2.0\nc-3.0\nd-4.0", "a-1.1\nb-2.1\nc-3.1\nd-4.1\ne-5.0")
 
@@ -337,7 +337,7 @@ func FuzzHashAll(f *testing.F) {
 
 		// Test with different worker counts
 		for _, workers := range []int{1, 2, 4, 8, 16} {
-			idHashes, exHashes := identity.HashAll(files, workers, seed)
+			idHashes, exHashes := identity.HashAll(files, workers, seed, identity.Hash)
 
 			if len(idHashes) != len(files) || len(exHashes) != len(files) {
 				t.Errorf("HashAll: length mismatch for workers=%d", workers)
@@ -648,6 +648,60 @@ func FuzzResultIterator(f *testing.F) {
 			if filterCount != res.Count(status) {
 				t.Errorf("Filter(%v) count %d != Count() %d", status, filterCount, res.Count(status))
 			}
+		}
+	})
+}
+
+// FuzzDiffWith tests the generic DiffWith API across multiple identity configurations.
+func FuzzDiffWith(f *testing.F) {
+	f.Add("libfoo.so.1\nlibbar.so.2", "libfoo.so.2\nlibbar.so.3\nlibnew.so.1")
+	f.Add("a-1.0\nb-2.0", "a-1.1\nb-2.1")
+	f.Add("file1\nfile2", "file1\nfile2")
+	f.Add("", "new1\nnew2")
+	f.Add("old1\nold2", "")
+
+	// Exact-only: identity hash == exact hash, equalFn always rejects identity matches.
+	exactOnly := func(s string, seed maphash.Seed) (uint64, uint64) {
+		_, exact := identity.Hash(s, seed)
+		return exact, exact
+	}
+	neverEqual := func(_, _ string) bool { return false }
+
+	f.Fuzz(func(t *testing.T, oldStr, newStr string) {
+		old := splitNonEmpty(oldStr)
+		cur := splitNonEmpty(newStr)
+
+		// Default options must match Diff.
+		base := Diff(old, cur)
+		got := DiffWith(old, cur)
+		if !slices.Equal(base.E, got.E) {
+			t.Error("DiffWith() without options differs from Diff()")
+		}
+
+		// WithAPKIdentity() must match Diff.
+		apk := DiffWith(old, cur, WithAPKIdentity())
+		if !slices.Equal(base.E, apk.E) {
+			t.Error("DiffWith(WithAPKIdentity()) differs from Diff()")
+		}
+
+		// Exact-only identity must satisfy all accounting invariants.
+		res := DiffWith(old, cur, WithIdentity(exactOnly, neverEqual))
+		if res == nil {
+			t.Fatal("exact-only result is nil")
+		}
+		unchanged := res.Count(Unchanged)
+		updated := res.Count(Updated)
+		removed := res.Count(Removed)
+		added := res.Count(Added)
+
+		if int(unchanged+updated+removed) != len(old) {
+			t.Errorf("exact-only old accounting: %d+%d+%d != %d", unchanged, updated, removed, len(old))
+		}
+		if int(unchanged+updated+removed+added) != len(res.E) {
+			t.Errorf("exact-only total count mismatch")
+		}
+		if updated != 0 {
+			t.Errorf("exact-only: Updated = %d, want 0 (neverEqual prevents identity matches)", updated)
 		}
 	})
 }

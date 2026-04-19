@@ -2,6 +2,7 @@ package files
 
 import (
 	"fmt"
+	"hash/maphash"
 	"runtime"
 	"slices"
 	"testing"
@@ -107,6 +108,36 @@ func TestDiff_Determinism(t *testing.T) {
 		run := Diff(old, cur)
 		if !slices.Equal(first.E, run.E) {
 			t.Fatal("non-deterministic")
+		}
+	}
+}
+
+func TestDiffRace2Determinism(t *testing.T) {
+	// Two identical old files competing for the single matching cur file.
+	// The lower old-file index must always win, producing deterministic output.
+	old := []string{"foo", "foo"}
+	cur := []string{"foo"}
+
+	first := diffP(old, cur, 4)
+	for range 100 {
+		run := diffP(old, cur, 4)
+		if !slices.Equal(first.E, run.E) {
+			t.Fatal("non-deterministic: parallel reconciliation race detected")
+		}
+	}
+}
+
+func TestDiffRace1DuplicateCur(t *testing.T) {
+	// Single old file with two identical cur candidates.
+	// The shard map min-index fix ensures the lowest cur index wins deterministically.
+	old := []string{"a-1.0"}
+	cur := []string{"a-2.0", "a-2.0"}
+
+	first := diffP(old, cur, 4)
+	for range 100 {
+		run := diffP(old, cur, 4)
+		if !slices.Equal(first.E, run.E) {
+			t.Fatal("non-deterministic: shard map race detected")
 		}
 	}
 }
@@ -400,6 +431,123 @@ func TestEmbedded(t *testing.T) {
 			t.Errorf("Embedded(%q) = (%d, %d), want (%d, %d)",
 				tt.input, gotI, gotJ, tt.wantI, tt.wantJ)
 		}
+	}
+}
+
+func TestDiffWith_Default(t *testing.T) {
+	cases := []struct {
+		name     string
+		old, cur []string
+	}{
+		{"empty", nil, nil},
+		{"basic", []string{"lib.so.1", "bin/foo"}, []string{"lib.so.2", "bin/foo"}},
+		{"all_removed", []string{"a.so.1", "b.so.1"}, nil},
+		{"all_added", nil, []string{"c.so.1", "d.so.1"}},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DiffWith(tt.old, tt.cur)
+			want := Diff(tt.old, tt.cur)
+			if !slices.Equal(got.E, want.E) {
+				t.Errorf("DiffWith() entries != Diff() entries: got %v, want %v", got.E, want.E)
+			}
+		})
+	}
+}
+
+func TestDiffWith_APKOption(t *testing.T) {
+	old := []string{"lib.so.1", "app-1.0.0-r0"}
+	cur := []string{"lib.so.2", "app-2.0.0-r1"}
+	got := DiffWith(old, cur, WithAPKIdentity())
+	want := Diff(old, cur)
+	if !slices.Equal(got.E, want.E) {
+		t.Errorf("DiffWith(WithAPKIdentity()) entries != Diff() entries: got %v, want %v", got.E, want.E)
+	}
+}
+
+func TestDiffWith_ExactOnly(t *testing.T) {
+	// Hash function returns (exact, exact): disables identity matching.
+	exactOnly := func(s string, seed maphash.Seed) (uint64, uint64) {
+		_, exact := identity.Hash(s, seed)
+		return exact, exact
+	}
+	// Equal function always rejects identity matches (they can't reach this since identity == exact).
+	neverEqual := func(_, _ string) bool { return false }
+
+	old := []string{"lib.so.1", "exact.txt"}
+	cur := []string{"lib.so.2", "exact.txt"}
+
+	r := DiffWith(old, cur, WithIdentity(exactOnly, neverEqual))
+
+	// lib.so.1 and lib.so.2 have different exact hashes: no match → Removed + Added.
+	// exact.txt and exact.txt share the same exact hash → Unchanged.
+	if r.Count(Unchanged) != 1 {
+		t.Errorf("Unchanged = %d, want 1", r.Count(Unchanged))
+	}
+	if r.Count(Updated) != 0 {
+		t.Errorf("Updated = %d, want 0", r.Count(Updated))
+	}
+	if r.Count(Removed) != 1 {
+		t.Errorf("Removed = %d, want 1", r.Count(Removed))
+	}
+	if r.Count(Added) != 1 {
+		t.Errorf("Added = %d, want 1", r.Count(Added))
+	}
+}
+
+func TestDiffWith_NilHashFunc(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("expected panic with nil HashFunc")
+		}
+	}()
+	DiffWith([]string{"a"}, []string{"b"}, WithIdentity(nil, identity.Equal))
+}
+
+func TestDiffWith_NilEqualFunc(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("expected panic with nil EqualFunc")
+		}
+	}()
+	DiffWith([]string{"a"}, []string{"b"}, WithIdentity(identity.Hash, nil))
+}
+
+func TestDiffWith_ExactFlagViolation(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("expected panic when HashFunc sets ExactFlag")
+		}
+	}()
+	badHash := func(_ string, _ maphash.Seed) (uint64, uint64) {
+		return identity.ExactFlag, identity.ExactFlag
+	}
+	DiffWith([]string{"a"}, []string{"b"}, WithIdentity(badHash, identity.Equal))
+}
+
+func TestDiffWith_CustomIdentity(t *testing.T) {
+	// Equal function rejects all identity matches; only exact matches succeed.
+	noIdentityEqual := func(_, _ string) bool { return false }
+
+	old := []string{"lib.so.1", "static.txt"}
+	cur := []string{"lib.so.2", "static.txt"}
+
+	r := DiffWith(old, cur, WithIdentity(identity.Hash, noIdentityEqual))
+
+	// lib.so.1 → lib.so.2: identity hashes match but equalFn rejects → Removed.
+	// static.txt → static.txt: exact match (bypasses equalFn) → Unchanged.
+	// lib.so.2: unmatched → Added.
+	if r.Count(Unchanged) != 1 {
+		t.Errorf("Unchanged = %d, want 1", r.Count(Unchanged))
+	}
+	if r.Count(Removed) != 1 {
+		t.Errorf("Removed = %d, want 1", r.Count(Removed))
+	}
+	if r.Count(Added) != 1 {
+		t.Errorf("Added = %d, want 1", r.Count(Added))
+	}
+	if r.Count(Updated) != 0 {
+		t.Errorf("Updated = %d, want 0", r.Count(Updated))
 	}
 }
 
