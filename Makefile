@@ -1,20 +1,31 @@
-GOEXP := GOEXPERIMENT=greenteagc
-
 .PHONY: clean
 clean:
 	go clean -testcache
 
+.PHONY: verify
+verify: clean
+	go vet ./...
+	gofumpt -w .
+	golangci-lint run ./...
+	gosec -quiet ./...
+	go run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@latest -fix -test ./...
+	go test -count=1 -race ./...
+
+.PHONY: fmt
+fmt:
+	gofumpt -w .
+
 .PHONY: test
 test: clean
-	$(GOEXP) go test -v -race ./...
+	go test -v -race ./...
 
 .PHONY: test-win
 test-win: clean
-	$(GOEXP) go test -v ./...
+	go test -v ./...
 
 .PHONY: bench
 bench: clean
-	$(GOEXP) go test -v -run=^\$$ -bench=. ./... -benchmem
+	go test -v -run=^\$$ -bench=. ./... -benchmem
 
 .PHONY: lint
 lint: _lint
@@ -78,6 +89,6 @@ _lint: $(LINTERS)
 FUZZ_TIME := 10s
 PKG_DIR := ./pkg/files
 .PHONY: fuzz
-FUZZERS = FuzzDiffConcurrent FuzzDiffMain FuzzDiffMulti FuzzEmbedded FuzzEqual FuzzHashAll FuzzHashSerial FuzzResultIterator FuzzScript FuzzSoname FuzzSuffix FuzzTryMarkConcurrent FuzzTryMarkSerial
+FUZZERS = FuzzDiffConcurrent FuzzDiffMain FuzzDiffMulti FuzzDiffWith FuzzEmbedded FuzzEqual FuzzHashAll FuzzHashSerial FuzzResultIterator FuzzScript FuzzSoname FuzzSuffix FuzzTryMarkConcurrent FuzzTryMarkSerial
 fuzz:
-	$(foreach f,$(FUZZERS),$(GOEXP) go test -parallel=1 --fuzz=$(f) -run=$(f) -fuzztime=$(FUZZ_TIME) $(PKG_DIR);)
+	$(foreach f,$(FUZZERS),go test -parallel=1 --fuzz=$(f) -run=$(f) -fuzztime=$(FUZZ_TIME) $(PKG_DIR);)

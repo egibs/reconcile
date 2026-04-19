@@ -10,7 +10,8 @@ import (
 const ExactFlag uint64 = 1 << 63
 
 // HashAll computes the identity and exact hashes for all strings in parallel.
-func HashAll(files []string, workers int, seed maphash.Seed) ([]uint64, []uint64) {
+// fn is called for each string to produce (identityHash, exactHash).
+func HashAll(files []string, workers int, seed maphash.Seed, fn func(string, maphash.Seed) (uint64, uint64)) ([]uint64, []uint64) {
 	length := len(files)
 	if length == 0 {
 		return []uint64{}, []uint64{}
@@ -32,7 +33,7 @@ func HashAll(files []string, workers int, seed maphash.Seed) ([]uint64, []uint64
 
 		wg.Go(func() {
 			for i := low; i < high; i++ {
-				idMatch[i], exMatch[i] = Hash(files[i], seed)
+				idMatch[i], exMatch[i] = fn(files[i], seed)
 			}
 		})
 	}

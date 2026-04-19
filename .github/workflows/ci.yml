@@ -164,6 +164,7 @@ jobs:
             "FuzzDiffConcurrent",
             "FuzzDiffMain",
             "FuzzDiffMulti",
+            "FuzzDiffWith",
             "FuzzEmbedded",
             "FuzzEqual",
             "FuzzHashAll",
@@ -200,9 +201,9 @@ jobs:
       - name: Run ${{ matrix.test }}
         if: runner.os != 'Windows'
         run: |
-          GOEXPERIMENT=greenteagc go test -parallel=1 --fuzz=${{ matrix.test }} -run=${{ matrix.test }} -fuzztime=10s ./pkg/files
+          go test -parallel=1 --fuzz=${{ matrix.test }} -run=${{ matrix.test }} -fuzztime=10s ./pkg/files
 
       - name: Run ${{ matrix.test }} (Windows)
         if: runner.os == 'Windows'
         run: |
-          set "GOEXPERIMENT=greenteagc" & go test -parallel=1 --fuzz=${{ matrix.test }} -run=${{ matrix.test }} -fuzztime=10s ./pkg/files
+          go test -parallel=1 --fuzz=${{ matrix.test }} -run=${{ matrix.test }} -fuzztime=10s ./pkg/files

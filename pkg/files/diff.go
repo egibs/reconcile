@@ -20,6 +20,45 @@ const (
 // and ensures deterministic results across calls.
 var seed = maphash.MakeSeed()
 
+// EqualFunc determines whether two strings share the same identity.
+// It must be symmetric: EqualFunc(a, b) == EqualFunc(b, a).
+type EqualFunc func(old, cur string) bool
+
+// HashFunc computes the identity and exact hashes for a string.
+// The first return value is the identity hash (version-stripped); the second is
+// the exact hash (full string). Both must have the high bit (1<<63) cleared.
+type HashFunc func(s string, seed maphash.Seed) (uint64, uint64)
+
+// Option configures DiffWith behavior.
+type Option func(*config)
+
+type config struct {
+	equalFn EqualFunc
+	hashFn  HashFunc
+}
+
+func defaultConfig() *config {
+	return &config{
+		equalFn: identity.Equal,
+		hashFn:  identity.Hash,
+	}
+}
+
+// WithIdentity configures DiffWith to use custom hash and equality functions.
+// hashFn computes identity and exact hashes; equalFn confirms identity matches.
+func WithIdentity(hashFn HashFunc, equalFn EqualFunc) Option {
+	return func(c *config) {
+		c.hashFn = hashFn
+		c.equalFn = equalFn
+	}
+}
+
+// WithAPKIdentity configures DiffWith to use APK-specific identity matching.
+// This produces identical results to Diff.
+func WithAPKIdentity() Option {
+	return WithIdentity(identity.Hash, identity.Equal)
+}
+
 // shard represents a single partition of the O(1) hash table.
 type shard struct {
 	sync.Mutex
@@ -28,19 +67,43 @@ type shard struct {
 
 // Diff compares two file lists and returns a Result containing all reconciliation entries.
 func Diff(old, cur []string) *Result {
-	return diffP(old, cur, max(1, runtime.GOMAXPROCS(0)))
+	return DiffWith(old, cur)
+}
+
+// DiffWith compares two string lists using the provided options.
+// Without options, behavior is identical to Diff.
+func DiffWith(old, cur []string, opts ...Option) *Result {
+	cfg := defaultConfig()
+	for _, o := range opts {
+		o(cfg)
+	}
+	if cfg.hashFn == nil {
+		panic("files: HashFunc must not be nil")
+	}
+	if cfg.equalFn == nil {
+		panic("files: EqualFunc must not be nil")
+	}
+	if h, e := cfg.hashFn("", seed); h&identity.ExactFlag != 0 || e&identity.ExactFlag != 0 {
+		panic("files: HashFunc must clear bit 63 (ExactFlag) on both returned hashes")
+	}
+	return diffPWith(old, cur, max(1, runtime.GOMAXPROCS(0)), cfg)
 }
 
 // diffP compares two file lists with an explicit worker count.
 func diffP(old, cur []string, workers int) *Result {
+	return diffPWith(old, cur, workers, defaultConfig())
+}
+
+// diffPWith compares two file lists with an explicit worker count and config.
+func diffPWith(old, cur []string, workers int, cfg *config) *Result {
 	oldFiles, newFiles := len(old), len(cur)
 	if oldFiles|newFiles == 0 {
 		return &Result{}
 	}
 
 	// Calculate hashes for both the old and new files.
-	oldHashes, oldEntries := identity.HashAll(old, workers, seed)
-	curHashes, curEntries := identity.HashAll(cur, workers, seed)
+	oldHashes, oldEntries := identity.HashAll(old, workers, seed, cfg.hashFn)
+	curHashes, curEntries := identity.HashAll(cur, workers, seed, cfg.hashFn)
 
 	// Build a map of all new files for O(1) lookups.
 	// Exact entry keys use a file's hash OR'd with the exact flag (hash | exactFlag).
@@ -73,74 +136,51 @@ func diffP(old, cur []string, workers int) *Result {
 				exKey := curEntries[i] | identity.ExactFlag
 
 				shard.Lock()
-				// Only store the first identity match (handling deduplication).
-				if _, ok := shard.m[idKey]; !ok {
+				// Identity: lowest index wins (deterministic across concurrent workers).
+				if existing, ok := shard.m[idKey]; !ok || fileIdx < existing {
 					shard.m[idKey] = fileIdx
 				}
-
-				// Always store exact matches (last occurrence takes precedence).
-				shard.m[exKey] = fileIdx
+				// Exact: highest index wins (deterministic across concurrent workers).
+				if existing, ok := shard.m[exKey]; !ok || fileIdx > existing {
+					shard.m[exKey] = fileIdx
+				}
 				shard.Unlock()
 			}
 		})
 	}
 	wg.Wait()
 
-	// Reconcile the old and new file lists.
-	// Check for exact matches first and identity matches second; fall back to removal
-	// if there are no exact or identity matches.
-	// Bitwise operations are used to track matches to ensure that a new file only matches one old file.
-	matches := make([]atomic.Uint64, (newFiles+63)>>6) // One bit per new file
-	results := make([][]Entry, workers)                // Per-worker reconciliation results
-	counts := make([][3]uint32, workers)               // Per-worker statuses excluding Additions which are handled separately
+	// Reconcile the old and new file lists sequentially.
+	// Sequential processing ensures the lower old-file index always claims a match
+	// slot first when multiple old files share a hash, making results deterministic.
+	matches := make([]atomic.Uint64, (newFiles+63)>>6)
+	reconciled := make([]Entry, 0, oldFiles)
+	var reconCounts [3]uint32
 
-	chunk = max(1, (oldFiles+workers-1)/workers)
+	for i := range oldFiles {
+		fileIdx := uint32(i) // #nosec G115
+		shard := &shards[oldHashes[i]&shardMask]
+		m := shard.m
 
-	for worker := range workers {
-		low := worker * chunk
-		if low >= oldFiles {
-			break
+		if exMatch, ok := m[oldEntries[i]|identity.ExactFlag]; ok {
+			if old[i] == cur[exMatch] && identity.TryMark(matches, exMatch) {
+				reconciled = append(reconciled, Entry{fileIdx, exMatch, Unchanged})
+				reconCounts[Unchanged]++
+				continue
+			}
 		}
 
-		high := min(low+chunk, oldFiles)
-
-		wg.Go(func() {
-			entries := make([]Entry, 0, high-low)
-			var status [3]uint32
-
-			for i := low; i < high; i++ {
-				fileIdx := uint32(i) // #nosec G115
-				shard := &shards[oldHashes[i]&shardMask]
-				m := shard.m
-
-				// Check for exact matches first.
-				if exMatch, ok := m[oldEntries[i]|identity.ExactFlag]; ok {
-					if old[i] == cur[exMatch] && identity.TryMark(matches, exMatch) {
-						entries = append(entries, Entry{fileIdx, exMatch, uint32(Unchanged)})
-						status[Unchanged]++
-						continue
-					}
-				}
-
-				// Check for identity matches second.
-				if idMatch, ok := m[oldHashes[i]]; ok {
-					if !identity.IsMarked(matches, idMatch) && identity.Equal(old[i], cur[idMatch]) && identity.TryMark(matches, idMatch) {
-						entries = append(entries, Entry{fileIdx, idMatch, uint32(Updated)})
-						status[Updated]++
-						continue
-					}
-				}
-
-				// Fall back to removal if there are no matches.
-				entries = append(entries, Entry{fileIdx, null, uint32(Removed)})
-				status[Removed]++
+		if idMatch, ok := m[oldHashes[i]]; ok {
+			if !identity.IsMarked(matches, idMatch) && cfg.equalFn(old[i], cur[idMatch]) && identity.TryMark(matches, idMatch) {
+				reconciled = append(reconciled, Entry{fileIdx, idMatch, Updated})
+				reconCounts[Updated]++
+				continue
 			}
+		}
 
-			results[worker] = entries
-			counts[worker] = status
-		})
+		reconciled = append(reconciled, Entry{fileIdx, null, Removed})
+		reconCounts[Removed]++
 	}
-	wg.Wait()
 
 	// Check matched file bits for unmatched files and treat them as additions.
 	additions := make([][]Entry, workers)
@@ -162,7 +202,7 @@ func diffP(old, cur []string, workers int) *Result {
 				fileIdx := uint32(i) // #nosec G115
 
 				if !identity.IsMarked(matches, fileIdx) {
-					entries = append(entries, Entry{null, fileIdx, uint32(Added)})
+					entries = append(entries, Entry{null, fileIdx, Added})
 				}
 			}
 
@@ -171,26 +211,15 @@ func diffP(old, cur []string, workers int) *Result {
 	}
 	wg.Wait()
 
-	// Deterministically merge all of the reconciliation results
-	// and additions into a final result type.
-	var total int
-	for _, r := range results {
-		total += len(r)
-	}
+	total := len(reconciled)
 	for _, a := range additions {
 		total += len(a)
 	}
 
 	result := &Result{E: make([]Entry, 0, total)}
-
-	for worker, entries := range results {
-		result.E = append(result.E, entries...)
-		// Only iterate over the Unchanged, Updated, and Removed status values
-		// since Additions are handled separately.
-		// Added's iota value is `3` so we can iterate over [0..2] contiguously.
-		for status := range 3 {
-			result.C[status].Add(counts[worker][status])
-		}
+	result.E = append(result.E, reconciled...)
+	for status := range 3 {
+		result.C[status].Add(reconCounts[status])
 	}
 
 	for _, entries := range additions {
