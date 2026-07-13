@@ -2,7 +2,7 @@ package identity
 
 import (
 	"hash/maphash"
-	"sync"
+	"math/bits"
 	"unsafe"
 )
 
@@ -19,31 +19,19 @@ func HashAll(files []string, workers int, seed maphash.Seed, fn func(string, map
 
 	idMatch, exMatch := make([]uint64, length), make([]uint64, length)
 
-	chunk := max(1, (length+workers-1)/workers)
-
-	var wg sync.WaitGroup
-
-	for w := range workers {
-		low := w * chunk
-		if low >= length {
-			break
+	ParallelChunks(length, workers, func(_, low, high int) {
+		for i := low; i < high; i++ {
+			idMatch[i], exMatch[i] = fn(files[i], seed)
 		}
-
-		high := min(low+chunk, length)
-
-		wg.Go(func() {
-			for i := low; i < high; i++ {
-				idMatch[i], exMatch[i] = fn(files[i], seed)
-			}
-		})
-	}
-	wg.Wait()
+	})
 
 	return idMatch, exMatch
 }
 
 // Hash computes the identity hash and exact match hash for a file path.
-// Both hashes have the high bit cleared to leave room for the exactMatch flag.
+// Both hashes have the high bit cleared to leave room for the ExactFlag.
+// The identity spans are determined by Spans, so Hash and Equal always agree
+// on what constitutes a file's identity.
 func Hash(s string, seed maphash.Seed) (uint64, uint64) {
 	bs := unsafe.Slice(unsafe.StringData(s), len(s))
 	length := len(bs)
@@ -54,21 +42,19 @@ func Hash(s string, seed maphash.Seed) (uint64, uint64) {
 		return exact, exact
 	}
 
-	if i := Soname(bs); i > 0 {
-		return maphash.Bytes(seed, bs[:i]) &^ ExactFlag, exact
+	j, s2, e := Spans(bs)
+	if j == length && s2 == e {
+		// No version pattern: the identity is the whole string.
+		return exact, exact
 	}
 
-	if i, j := Script(bs); i > 0 {
-		return (maphash.Bytes(seed, bs[:i]) ^ maphash.Bytes(seed, bs[j:])) &^ ExactFlag, exact
+	h := maphash.Bytes(seed, bs[:j])
+	if s2 < e {
+		// Rotating the prefix hash before combining keeps the operation
+		// non-commutative and prevents the structural collapse of a plain
+		// XOR, where equal prefix and suffix spans always cancel to zero.
+		h = bits.RotateLeft64(h, 17) ^ maphash.Bytes(seed, bs[s2:e])
 	}
 
-	if i, j := Embedded(bs); i > 0 {
-		return (maphash.Bytes(seed, bs[:i]) ^ maphash.Bytes(seed, bs[j:])) &^ ExactFlag, exact
-	}
-
-	if i := Suffix(bs); i > 0 {
-		return maphash.Bytes(seed, bs[:i]) &^ ExactFlag, exact
-	}
-
-	return exact, exact
+	return h &^ ExactFlag, exact
 }

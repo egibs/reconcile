@@ -10,6 +10,96 @@ import (
 	"github.com/egibs/reconcile/internal/identity"
 )
 
+// checkResult validates the structural and semantic invariants that every
+// default-configuration Diff result must satisfy:
+//   - status counts sum to the entry count
+//   - every old index appears exactly once (Unchanged, Updated, or Removed)
+//   - every cur index appears exactly once (Unchanged, Updated, or Added)
+//   - null sentinels appear exactly where the Entry contract says
+//   - Unchanged entries reference byte-identical strings
+//   - Updated entries reference distinct strings that share an identity
+func checkResult(t *testing.T, old, cur []string, res *Result) {
+	t.Helper()
+
+	if res == nil {
+		t.Fatal("result is unexpectedly nil")
+	}
+
+	unchanged := res.Count(Unchanged)
+	updated := res.Count(Updated)
+	removed := res.Count(Removed)
+	added := res.Count(Added)
+
+	if total := unchanged + updated + removed + added; int(total) != len(res.E) {
+		t.Errorf("count mismatch: sum=%d, entries=%d", total, len(res.E))
+	}
+	if oldCount := unchanged + updated + removed; int(oldCount) != len(old) {
+		t.Errorf("old file count mismatch: got %d, want %d", oldCount, len(old))
+	}
+	if curCount := unchanged + updated + added; int(curCount) != len(cur) {
+		t.Errorf("cur file count mismatch: got %d, want %d", curCount, len(cur))
+	}
+
+	seenOld := make(map[uint32]bool, len(old))
+	seenCur := make(map[uint32]bool, len(cur))
+
+	for e := range res.All() {
+		switch e.Status {
+		case Unchanged, Updated:
+			if e.Old == null || e.New == null {
+				t.Errorf("unchanged/updated entry has null index: %+v", e)
+				continue
+			}
+			if int(e.Old) >= len(old) || int(e.New) >= len(cur) {
+				t.Errorf("entry index out of bounds: %+v, old=%d, new=%d", e, len(old), len(cur))
+				continue
+			}
+			if e.Status == Unchanged && old[e.Old] != cur[e.New] {
+				t.Errorf("unchanged entry pairs different strings: %q vs %q", old[e.Old], cur[e.New])
+			}
+			if e.Status == Updated {
+				if old[e.Old] == cur[e.New] {
+					t.Errorf("updated entry pairs identical strings: %q", old[e.Old])
+				}
+				if !identity.Equal(old[e.Old], cur[e.New]) {
+					t.Errorf("updated entry pairs different identities: %q vs %q", old[e.Old], cur[e.New])
+				}
+			}
+		case Removed:
+			if e.Old == null || e.New != null {
+				t.Errorf("removed entry has wrong indices: %+v", e)
+				continue
+			}
+			if int(e.Old) >= len(old) {
+				t.Errorf("removed entry index out of bounds: %+v", e)
+				continue
+			}
+		case Added:
+			if e.Old != null || e.New == null {
+				t.Errorf("added entry has wrong indices: %+v", e)
+				continue
+			}
+			if int(e.New) >= len(cur) {
+				t.Errorf("added entry index out of bounds: %+v", e)
+				continue
+			}
+		}
+
+		if e.Old != null {
+			if seenOld[e.Old] {
+				t.Errorf("old index %d appears in multiple entries", e.Old)
+			}
+			seenOld[e.Old] = true
+		}
+		if e.New != null {
+			if seenCur[e.New] {
+				t.Errorf("cur index %d appears in multiple entries", e.New)
+			}
+			seenCur[e.New] = true
+		}
+	}
+}
+
 // FuzzDiffMain tests the main reconciliation algorithm with single file pairs.
 // Validates that the result is non-nil and status counts are consistent.
 func FuzzDiffMain(f *testing.F) {
@@ -58,17 +148,8 @@ func FuzzDiffMain(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, a, b string) {
-		res := Diff([]string{a}, []string{b})
-
-		if res == nil {
-			t.Fatal("result is unexpectedly nil")
-		}
-
-		// Validate status count consistency
-		total := res.Count(Unchanged) + res.Count(Updated) + res.Count(Removed) + res.Count(Added)
-		if int(total) != len(res.E) {
-			t.Errorf("status count mismatch: sum=%d, entries=%d", total, len(res.E))
-		}
+		old, cur := []string{a}, []string{b}
+		checkResult(t, old, cur, Diff(old, cur))
 	})
 }
 
@@ -89,50 +170,7 @@ func FuzzDiffMulti(f *testing.F) {
 		old := splitNonEmpty(oldStr)
 		cur := splitNonEmpty(newStr)
 
-		res := Diff(old, cur)
-
-		if res == nil {
-			t.Fatal("result is unexpectedly nil")
-		}
-
-		// Validate counts
-		unchanged := res.Count(Unchanged)
-		updated := res.Count(Updated)
-		removed := res.Count(Removed)
-		added := res.Count(Added)
-
-		total := unchanged + updated + removed + added
-		if int(total) != len(res.E) {
-			t.Errorf("count mismatch: sum=%d, entries=%d", total, len(res.E))
-		}
-
-		// Validate that removed + unchanged + updated == len(old)
-		// (each old file is either unchanged, updated, or removed)
-		oldCount := unchanged + updated + removed
-		if int(oldCount) != len(old) {
-			t.Errorf("old file count mismatch: got %d, want %d", oldCount, len(old))
-		}
-
-		// Validate entries have valid indices and statuses
-		for status, e := range res.All() {
-			switch status {
-			case Unchanged, Updated:
-				if e.Old == null || e.New == null {
-					t.Errorf("unchanged/updated entry has null index: %+v", e)
-				}
-				if int(e.Old) >= len(old) || int(e.New) >= len(cur) {
-					t.Errorf("entry index out of bounds: %+v, old=%d, new=%d", e, len(old), len(cur))
-				}
-			case Removed:
-				if e.Old == null || e.New != null {
-					t.Errorf("removed entry has wrong indices: %+v", e)
-				}
-			case Added:
-				if e.Old != null || e.New == null {
-					t.Errorf("added entry has wrong indices: %+v", e)
-				}
-			}
-		}
+		checkResult(t, old, cur, Diff(old, cur))
 	})
 }
 
@@ -161,23 +199,8 @@ func FuzzDiffConcurrent(f *testing.F) {
 		wg.Wait()
 
 		// Validate each result independently
-		for i, res := range results {
-			if res == nil {
-				t.Errorf("result[%d] is nil", i)
-				continue
-			}
-
-			// Validate count consistency
-			total := res.Count(Unchanged) + res.Count(Updated) + res.Count(Removed) + res.Count(Added)
-			if int(total) != len(res.E) {
-				t.Errorf("result[%d]: count mismatch sum=%d, entries=%d", i, total, len(res.E))
-			}
-
-			// Each old file should appear exactly once (unchanged, updated, or removed)
-			oldCount := res.Count(Unchanged) + res.Count(Updated) + res.Count(Removed)
-			if int(oldCount) != len(old) {
-				t.Errorf("result[%d]: old count mismatch got=%d, want=%d", i, oldCount, len(old))
-			}
+		for _, res := range results {
+			checkResult(t, old, cur, res)
 		}
 	})
 }
@@ -354,8 +377,8 @@ func FuzzHashAll(f *testing.F) {
 	})
 }
 
-// FuzzTryMark tests concurrent bitset marking operations.
-func FuzzTryMarkSerial(f *testing.F) {
+// FuzzMarkSerial tests bitset marking operations.
+func FuzzMarkSerial(f *testing.F) {
 	f.Add(uint32(0), uint32(64))
 	f.Add(uint32(63), uint32(64))
 	f.Add(uint32(64), uint32(128))
@@ -363,33 +386,38 @@ func FuzzTryMarkSerial(f *testing.F) {
 	f.Add(uint32(0), uint32(1))
 
 	f.Fuzz(func(t *testing.T, idx, size uint32) {
-		if size == 0 || idx >= size {
+		if size == 0 || idx >= size || size > 1<<20 {
 			t.Skip("invalid parameters")
 		}
 
-		// Allocate bitset
-		bitsetLen := (size + 63) >> 6
+		// Widen before rounding: (size + 63) in uint32 wraps for sizes near
+		// the top of the range, which would allocate an empty bitset.
+		bitsetLen := (uint64(size) + 63) >> 6
 		bitset := make([]atomic.Uint64, bitsetLen)
 
-		// First mark should succeed
-		if !identity.TryMark(bitset, idx) {
-			t.Errorf("TryMark(%d) should succeed on fresh bitset", idx)
+		if identity.IsMarked(bitset, idx) {
+			t.Errorf("IsMarked(%d) should return false on fresh bitset", idx)
 		}
 
-		// Second mark should fail
-		if identity.TryMark(bitset, idx) {
-			t.Errorf("TryMark(%d) should fail on already-marked bit", idx)
-		}
+		identity.Mark(bitset, idx)
 
-		// IsMarked should return true
 		if !identity.IsMarked(bitset, idx) {
-			t.Errorf("IsMarked(%d) should return true after TryMark", idx)
+			t.Errorf("IsMarked(%d) should return true after Mark", idx)
+		}
+
+		// No neighboring bit may be disturbed.
+		for _, n := range []uint32{idx - 1, idx + 1} {
+			if n < size && n != idx && identity.IsMarked(bitset, n) {
+				t.Errorf("Mark(%d) disturbed neighboring bit %d", idx, n)
+			}
 		}
 	})
 }
 
-// FuzzTryMarkConcurrent tests concurrent bitset operations under contention.
-func FuzzTryMarkConcurrent(f *testing.F) {
+// FuzzMarkConcurrent tests concurrent marking of distinct bits, including
+// bits that share a word, which is exactly how the reconciliation passes
+// use the bitset.
+func FuzzMarkConcurrent(f *testing.F) {
 	f.Add(uint32(100))
 	f.Add(uint32(1000))
 
@@ -398,33 +426,30 @@ func FuzzTryMarkConcurrent(f *testing.F) {
 			t.Skip("size out of range")
 		}
 
-		bitsetLen := (size + 63) >> 6
+		bitsetLen := (uint64(size) + 63) >> 6
 		bitset := make([]atomic.Uint64, bitsetLen)
 
-		// Track successful marks per bit
-		successCount := make([]atomic.Uint32, size)
+		// Partition the bit range among workers; each bit is marked by
+		// exactly one goroutine, but word boundaries are shared.
+		workers := uint32(8)
+		chunk := max(1, (size+workers-1)/workers)
 
 		var wg sync.WaitGroup
-		workers := 8
 
-		for range workers {
+		for low := uint32(0); low < size; low += chunk {
+			high := min(low+chunk, size)
 			wg.Go(func() {
-				for i := range size {
-					if identity.TryMark(bitset, i) {
-						successCount[i].Add(1)
-					}
+				for i := low; i < high; i++ {
+					identity.Mark(bitset, i)
 				}
 			})
 		}
 		wg.Wait()
 
-		// Each bit should be successfully marked exactly once
+		// Every bit must be set afterwards.
 		for i := range size {
-			if successCount[i].Load() != 1 {
-				t.Errorf("bit %d marked %d times (expected 1)", i, successCount[i].Load())
-			}
 			if !identity.IsMarked(bitset, i) {
-				t.Errorf("bit %d not marked after TryMark", i)
+				t.Errorf("bit %d not marked", i)
 			}
 		}
 	})
@@ -559,14 +584,30 @@ func FuzzSuffix(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, input string) {
-		i := identity.Suffix([]byte(input))
+		i, ext := identity.Suffix([]byte(input))
 
-		if i < 0 {
-			t.Errorf("Suffix(%q) = %d: negative return", input, i)
+		if i < 0 || ext < 0 {
+			t.Errorf("Suffix(%q) = (%d, %d): negative return", input, i, ext)
 		}
 
-		if i > len(input) {
-			t.Errorf("Suffix(%q) = %d: exceeds input length %d", input, i, len(input))
+		if i > len(input) || ext > len(input) {
+			t.Errorf("Suffix(%q) = (%d, %d): exceeds input length %d", input, i, ext, len(input))
+		}
+
+		if i == 0 && ext != 0 {
+			t.Errorf("Suffix(%q) = (%d, %d): extension without version", input, i, ext)
+		}
+
+		if i > 0 {
+			if ext <= i {
+				t.Errorf("Suffix(%q) = (%d, %d): extStart must be > versionStart", input, i, ext)
+			}
+			if input[i] != '-' {
+				t.Errorf("Suffix(%q) = (%d, %d): version must begin at a '-'", input, i, ext)
+			}
+			if i+1 < len(input) && input[i+1]-'0' >= 10 {
+				t.Errorf("Suffix(%q) = (%d, %d): version must begin with a digit", input, i, ext)
+			}
 		}
 	})
 }
@@ -677,12 +718,7 @@ func FuzzDiffWith(f *testing.F) {
 		if !slices.Equal(base.E, got.E) {
 			t.Error("DiffWith() without options differs from Diff()")
 		}
-
-		// WithAPKIdentity() must match Diff.
-		apk := DiffWith(old, cur, WithAPKIdentity())
-		if !slices.Equal(base.E, apk.E) {
-			t.Error("DiffWith(WithAPKIdentity()) differs from Diff()")
-		}
+		checkResult(t, old, cur, base)
 
 		// Exact-only identity must satisfy all accounting invariants.
 		res := DiffWith(old, cur, WithIdentity(exactOnly, neverEqual))
