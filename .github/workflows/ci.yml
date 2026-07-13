@@ -142,40 +142,15 @@ jobs:
         run: |
           make ${{ matrix.target }}
 
-  fuzz:
+  # The fuzzer list is derived from the test binary, so the fuzz matrix can
+  # never drift from the fuzz targets defined in the source.
+  fuzz-list:
     if: ${{ github.repository == 'egibs/reconcile' }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          [
-            "macos-15-intel",
-            "macos-latest",
-            "ubuntu-24.04-arm",
-            "ubuntu-latest",
-            "windows-11-arm",
-            "windows-latest",
-          ]
-        test:
-          [
-            "FuzzDiffConcurrent",
-            "FuzzDiffMain",
-            "FuzzDiffMulti",
-            "FuzzDiffWith",
-            "FuzzEmbedded",
-            "FuzzEqual",
-            "FuzzHashAll",
-            "FuzzHashSerial",
-            "FuzzResultIterator",
-            "FuzzScript",
-            "FuzzSoname",
-            "FuzzSuffix",
-            "FuzzTryMarkConcurrent",
-            "FuzzTryMarkSerial",
-          ]
+    outputs:
+      fuzzers: ${{ steps.list.outputs.fuzzers }}
     steps:
       - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
@@ -198,12 +173,64 @@ jobs:
           check-latest: true
           cache: true
 
-      - name: Run ${{ matrix.test }}
-        if: runner.os != 'Windows'
+      - name: List fuzz targets
+        id: list
         run: |
-          go test -parallel=1 --fuzz=${{ matrix.test }} -run=${{ matrix.test }} -fuzztime=10s ./pkg/files
+          echo "fuzzers=$(go test -list '^Fuzz' -run '^$' ./pkg/files | grep '^Fuzz' | jq -cnR '[inputs]')" >> "$GITHUB_OUTPUT"
 
-      - name: Run ${{ matrix.test }} (Windows)
-        if: runner.os == 'Windows'
+  fuzz:
+    if: ${{ github.repository == 'egibs/reconcile' }}
+    needs: fuzz-list
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          [
+            "macos-15-intel",
+            "macos-latest",
+            "ubuntu-24.04-arm",
+            "ubuntu-latest",
+            "windows-11-arm",
+            "windows-latest",
+          ]
+        test: ${{ fromJSON(needs.fuzz-list.outputs.fuzzers) }}
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            proxy.golang.org:443
+            release-assets.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: "go.mod"
+          check-latest: true
+          cache: true
+
+      - name: Run ${{ matrix.test }}
         run: |
-          go test -parallel=1 --fuzz=${{ matrix.test }} -run=${{ matrix.test }} -fuzztime=10s ./pkg/files
+          go test -parallel=1 -fuzz='^${{ matrix.test }}$' -run='^${{ matrix.test }}$' -fuzztime=10s ./pkg/files
+
+      # Fuzz-found failures write a minimized reproducer to testdata/fuzz on
+      # the ephemeral runner; upload it so the failing input survives the job.
+      - name: Upload fuzz failure reproducers
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-reproducer-${{ matrix.test }}-${{ matrix.os }}
+          path: pkg/files/testdata/fuzz/
+          if-no-files-found: ignore

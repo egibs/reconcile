@@ -5,6 +5,7 @@ import (
 	"hash/maphash"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
 
@@ -52,6 +53,7 @@ func TestHash_SameIdentity(t *testing.T) {
 		{"app-1.0.0-r0", "app-2.0.0-r5"},
 		{"foo.1.2.3.so", "foo.4.5.6.so"},
 		{"binary", "binary"},
+		{"file-1.txt", "file-2.txt"},
 	}
 
 	for _, c := range cases {
@@ -68,6 +70,11 @@ func TestHash_DifferentIdentity(t *testing.T) {
 		{"libfoo.so.1", "libbar.so.1"},
 		{"app-1.0.0", "other-1.0.0"},
 		{"a.txt", "b.txt"},
+		{"file-1.txt", "file-2.pdf"},
+		{"openssl-3", "openssl-3-doc"},
+		// Regression: with an XOR span combiner these both collapsed to
+		// identity hash 0 because their prefix and suffix spans are equal.
+		{".config.1.2.3.config", ".cache.9.9.9.cache"},
 	}
 
 	for _, c := range cases {
@@ -90,6 +97,10 @@ func TestEqual(t *testing.T) {
 		{"app-1.0.0-r5", "app-2.0.0-r0", true},
 		{"README.md", "README.md", true},
 		{"a.txt", "b.txt", false},
+		{"file-1.txt", "file-2.txt", true},         // same extension, same identity
+		{"file-1.txt", "file-2.pdf", false},        // different extensions never share identity
+		{"libfoo.so.1", "libfoo.so.1.conf", false}, // library vs. config file
+		{"openssl-3", "openssl-3-doc", false},      // subpackage is not a version bump
 	}
 
 	for _, c := range cases {
@@ -139,6 +150,145 @@ func TestDiffRace1DuplicateCur(t *testing.T) {
 		if !slices.Equal(first.E, run.E) {
 			t.Fatal("non-deterministic: shard map race detected")
 		}
+	}
+}
+
+func TestDiff_WorkerInvariance(t *testing.T) {
+	// Results must be identical across worker counts: the sequential and
+	// parallel reconcilers implement the same per-key pairing.
+	const n = 20_000
+	old := make([]string, 0, n)
+	cur := make([]string, 0, n)
+	for i := range n / 4 {
+		old = append(old,
+			fmt.Sprintf("libx%d.so.1", i%997),      // identity groups with duplicates
+			fmt.Sprintf("libx%d.so.1.0.0", i%997),  // soname pairs
+			fmt.Sprintf("app%d-1.0.0-r%d", i, i%3), // suffix versions
+			fmt.Sprintf("static-%d.txt", i%1500),   // exact duplicates
+		)
+		cur = append(cur,
+			fmt.Sprintf("libx%d.so.2", i%997),
+			fmt.Sprintf("libx%d.so.2.0.0", i%997),
+			fmt.Sprintf("app%d-2.0.0-r%d", i, i%5),
+			fmt.Sprintf("static-%d.txt", i%1500),
+		)
+	}
+
+	want := diffP(old, cur, 1)
+	for _, w := range []int{2, 4, 8, 16} {
+		got := diffP(old, cur, w)
+		if !slices.Equal(want.E, got.E) {
+			t.Fatalf("workers=%d entries differ from workers=1", w)
+		}
+		if want.C != got.C {
+			t.Fatalf("workers=%d counts %v differ from workers=1 %v", w, got.C, want.C)
+		}
+	}
+}
+
+// counts returns the four status counts of a Result for compact assertions.
+func counts(r *Result) [4]uint32 {
+	return [4]uint32{r.Count(Unchanged), r.Count(Updated), r.Count(Removed), r.Count(Added)}
+}
+
+func TestDiff_SonamePair(t *testing.T) {
+	// The standard shared-library layout: a version symlink plus the real
+	// file, across a version bump. Both pairs share identity "libfoo.so"
+	// and both must reconcile as Updated.
+	old := []string{"libfoo.so.1", "libfoo.so.1.0.0"}
+	cur := []string{"libfoo.so.2", "libfoo.so.2.0.0"}
+
+	r := Diff(old, cur)
+	if got, want := counts(r), [4]uint32{0, 2, 0, 0}; got != want {
+		t.Errorf("counts = %v, want %v", got, want)
+	}
+}
+
+func TestDiff_ExactBeatsIdentity(t *testing.T) {
+	// "libfoo.so.2" is byte-identical in both lists and must classify as
+	// Unchanged even though "libfoo.so.1" shares its identity and is
+	// processed first.
+	old := []string{"libfoo.so.1", "libfoo.so.2"}
+	cur := []string{"libfoo.so.2", "libfoo.so.3"}
+
+	r := Diff(old, cur)
+	if got, want := counts(r), [4]uint32{1, 1, 0, 0}; got != want {
+		t.Errorf("counts = %v, want %v", got, want)
+	}
+	if !slices.Contains(r.E, Entry{1, 0, Unchanged}) {
+		t.Errorf("missing Unchanged entry for libfoo.so.2: %v", r.E)
+	}
+	if !slices.Contains(r.E, Entry{0, 1, Updated}) {
+		t.Errorf("missing Updated entry libfoo.so.1 -> libfoo.so.3: %v", r.E)
+	}
+
+	// Same shape with suffix-versioned names, shrinking to one cur file.
+	r = Diff([]string{"a-1.0", "a-2.0"}, []string{"a-2.0"})
+	if got, want := counts(r), [4]uint32{1, 0, 1, 0}; got != want {
+		t.Errorf("suffix chain counts = %v, want %v", got, want)
+	}
+}
+
+func TestDiff_IdenticalDuplicates(t *testing.T) {
+	cases := []struct {
+		name     string
+		old, cur []string
+		want     [4]uint32
+	}{
+		{"balanced", []string{"a", "a"}, []string{"a", "a"}, [4]uint32{2, 0, 0, 0}},
+		{"more_old", []string{"a", "a"}, []string{"a"}, [4]uint32{1, 0, 1, 0}},
+		{"more_cur", []string{"a"}, []string{"a", "a"}, [4]uint32{1, 0, 0, 1}},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			r := Diff(tt.old, tt.cur)
+			if got := counts(r); got != tt.want {
+				t.Errorf("counts = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDiff_ExtensionContract(t *testing.T) {
+	// Files of the same name with different extensions do not share an
+	// identity (README contract).
+	cases := [][2][]string{
+		{{"file-1.txt"}, {"file-2.pdf"}},
+		{{"report-2024.pdf"}, {"report-2025.txt"}},
+		{{"libfoo.so.1"}, {"libfoo.so.1.conf"}},
+	}
+	for _, c := range cases {
+		r := Diff(c[0], c[1])
+		if got, want := counts(r), [4]uint32{0, 0, 1, 1}; got != want {
+			t.Errorf("Diff(%v, %v) counts = %v, want %v", c[0], c[1], got, want)
+		}
+	}
+}
+
+func TestDiff_NoFalseVersionPatterns(t *testing.T) {
+	// Two-component embedded versions and digit-free trailing segments are
+	// not version patterns; these pairs are distinct files.
+	cases := [][2][]string{
+		{{"data.1.2.json"}, {"data.9.9.json"}},
+		{{"openssl-3"}, {"openssl-3-doc"}},
+	}
+	for _, c := range cases {
+		r := Diff(c[0], c[1])
+		if got, want := counts(r), [4]uint32{0, 0, 1, 1}; got != want {
+			t.Errorf("Diff(%v, %v) counts = %v, want %v", c[0], c[1], got, want)
+		}
+	}
+}
+
+func TestDiff_EqualSpanIdentities(t *testing.T) {
+	// Regression: names whose prefix and suffix spans are byte-equal used to
+	// collapse to identity hash 0, shadowing genuine matches.
+	old := []string{".config.1.2.3.config"}
+	cur := []string{".cache.9.9.9.cache", ".config.9.9.9.config"}
+
+	r := Diff(old, cur)
+	if got, want := counts(r), [4]uint32{0, 1, 0, 1}; got != want {
+		t.Errorf("counts = %v, want %v", got, want)
 	}
 }
 
@@ -233,13 +383,17 @@ func BenchmarkMemory1M(b *testing.B) {
 	runtime.GC()
 	runtime.ReadMemStats(&m1)
 
-	r := Diff(old, cur)
+	var r *Result
+	iters := 0
+	for b.Loop() {
+		r = Diff(old, cur)
+		iters++
+	}
 
 	runtime.ReadMemStats(&m2)
 	_ = r
 
-	b.ReportMetric(float64(m2.TotalAlloc-m1.TotalAlloc)/1e6, "MB-alloc")
-	b.ReportMetric(float64(m2.HeapAlloc-m1.HeapAlloc)/1e6, "MB-heap")
+	b.ReportMetric(float64(m2.TotalAlloc-m1.TotalAlloc)/1e6/float64(iters), "MB-alloc/op")
 }
 
 func genData(n int) ([]string, []string) {
@@ -353,6 +507,11 @@ func TestSoname(t *testing.T) {
 		{"libfoo.so", 0},                   // no version
 		{"foo.txt", 0},                     // not a .so
 		{".so.1", 3},                       // minimal match (edge case)
+		{"libfoo.so.1.conf", 0},            // version must end the name
+		{"libfoo.so.1.txt", 0},             // version must end the name
+		{"x.conf.so.2", 9},                 // trailing version after interior dots
+		{"libfoo.so.", 0},                  // no digit after separator
+		{"libfoo.so.a", 0},                 // non-numeric version
 	}
 
 	for _, tt := range tests {
@@ -391,22 +550,30 @@ func TestScript(t *testing.T) {
 
 func TestSuffix(t *testing.T) {
 	tests := []struct {
-		input string
-		want  int
+		input   string
+		want    int
+		wantExt int
 	}{
-		{"app-1.0.0", 3},
-		{"app-1.0.0-r5", 3},
-		{"tool-2.3.4-beta1", 4},
-		{"python-3.11", 6},
-		{"usr/bin/ls", 0}, // no version suffix
-		{"foo", 0},        // too short
-		{"foo-bar", 0},    // no digit after -
+		{"app-1.0.0", 3, 9},
+		{"app-1.0.0-r5", 3, 12},
+		{"tool-2.3.4-beta1", 4, 16},
+		{"python-3.11", 6, 11},
+		{"file-1.txt", 4, 6},        // extension preserved in identity
+		{"report-2024.pdf", 6, 11},  // extension preserved in identity
+		{"libfoo-1.0.so", 6, 10},    // extension preserved in identity
+		{"usr/bin/ls", 0, 0},        // no version suffix
+		{"foo", 0, 0},               // too short
+		{"foo-bar", 0, 0},           // no digit after -
+		{"openssl-3-doc", 0, 0},     // trailing subpackage name is not a version
+		{"gtk-3-demo", 0, 0},        // trailing subpackage name is not a version
+		{"config-2fa-backup", 0, 0}, // trailing subpackage name is not a version
+		{"-1.0", 0, 0},              // empty name
 	}
 
 	for _, tt := range tests {
-		got := identity.Suffix([]byte(tt.input))
-		if got != tt.want {
-			t.Errorf("Suffix(%q) = %d, want %d", tt.input, got, tt.want)
+		got, gotExt := identity.Suffix([]byte(tt.input))
+		if got != tt.want || gotExt != tt.wantExt {
+			t.Errorf("Suffix(%q) = (%d, %d), want (%d, %d)", tt.input, got, gotExt, tt.want, tt.wantExt)
 		}
 	}
 }
@@ -420,9 +587,12 @@ func TestEmbedded(t *testing.T) {
 		{"foo.1.2.3.so", 3, 9},
 		{"bar.4.5.6.dylib", 3, 9},
 		{"libfoo.1.2.3.4.so", 6, 14},
-		{"foo.so", 0, 0},   // no embedded version
-		{"foo.1.so", 0, 0}, // only 1 dot in version
-		{"foo.txt", 0, 0},  // not a library
+		{"foo.so", 0, 0},             // no embedded version
+		{"foo.1.so", 0, 0},           // one-component version
+		{"foo.1.2.so", 0, 0},         // two-component version
+		{"data.1.2.json", 0, 0},      // two-component version
+		{"report.2024.12.pdf", 0, 0}, // date-style name, not a version
+		{"foo.txt", 0, 0},            // not a library
 	}
 
 	for _, tt := range tests {
@@ -452,16 +622,6 @@ func TestDiffWith_Default(t *testing.T) {
 				t.Errorf("DiffWith() entries != Diff() entries: got %v, want %v", got.E, want.E)
 			}
 		})
-	}
-}
-
-func TestDiffWith_APKOption(t *testing.T) {
-	old := []string{"lib.so.1", "app-1.0.0-r0"}
-	cur := []string{"lib.so.2", "app-2.0.0-r1"}
-	got := DiffWith(old, cur, WithAPKIdentity())
-	want := Diff(old, cur)
-	if !slices.Equal(got.E, want.E) {
-		t.Errorf("DiffWith(WithAPKIdentity()) entries != Diff() entries: got %v, want %v", got.E, want.E)
 	}
 }
 
@@ -513,16 +673,65 @@ func TestDiffWith_NilEqualFunc(t *testing.T) {
 	DiffWith([]string{"a"}, []string{"b"}, WithIdentity(identity.Hash, nil))
 }
 
-func TestDiffWith_ExactFlagViolation(t *testing.T) {
+func TestDiffWith_ExactFlagIgnored(t *testing.T) {
+	// A HashFunc that sets bit 63 on every hash must not corrupt the shared
+	// key namespace: DiffWith masks the flag at key construction, so results
+	// are identical to the well-behaved equivalent.
+	flagged := func(s string, seed maphash.Seed) (uint64, uint64) {
+		h, e := identity.Hash(s, seed)
+		return h | identity.ExactFlag, e | identity.ExactFlag
+	}
+
+	old := []string{"A", "a-1.0"}
+	cur := []string{"A", "a-2.0", "B"}
+
+	r := DiffWith(old, cur, WithIdentity(flagged, identity.Equal))
+
+	want := [4]uint32{1, 1, 0, 1} // Unchanged, Updated, Removed, Added
+	got := [4]uint32{r.Count(Unchanged), r.Count(Updated), r.Count(Removed), r.Count(Added)}
+	if got != want {
+		t.Errorf("counts = %v, want %v", got, want)
+	}
+}
+
+func TestDiffWith_HashFuncNeverSeesSyntheticInput(t *testing.T) {
+	// A HashFunc may assume it is only called with strings from the input
+	// lists; one that indexes s[0] must not panic on a synthetic probe.
+	indexing := func(s string, seed maphash.Seed) (uint64, uint64) {
+		_ = s[0] // panics on ""
+		return identity.Hash(s, seed)
+	}
+
+	r := DiffWith([]string{"foo"}, []string{"foo"}, WithIdentity(indexing, identity.Equal))
+	if r.Count(Unchanged) != 1 {
+		t.Errorf("Unchanged = %d, want 1", r.Count(Unchanged))
+	}
+}
+
+func TestDiffWith_ExactEquality(t *testing.T) {
+	// Normalized (case-insensitive) matching: the hash and both equality
+	// functions operate on the folded form, so "README" and "readme"
+	// classify as Unchanged.
+	foldedHash := func(s string, seed maphash.Seed) (uint64, uint64) {
+		return identity.Hash(strings.ToLower(s), seed)
+	}
+
+	r := DiffWith([]string{"README"}, []string{"readme"},
+		WithIdentity(foldedHash, strings.EqualFold),
+		WithExactEquality(strings.EqualFold))
+
+	if r.Count(Unchanged) != 1 {
+		t.Errorf("Unchanged = %d, want 1", r.Count(Unchanged))
+	}
+}
+
+func TestDiffWith_NilExactFunc(t *testing.T) {
 	defer func() {
 		if recover() == nil {
-			t.Error("expected panic when HashFunc sets ExactFlag")
+			t.Error("expected panic with nil exact EqualFunc")
 		}
 	}()
-	badHash := func(_ string, _ maphash.Seed) (uint64, uint64) {
-		return identity.ExactFlag, identity.ExactFlag
-	}
-	DiffWith([]string{"a"}, []string{"b"}, WithIdentity(badHash, identity.Equal))
+	DiffWith([]string{"a"}, []string{"b"}, WithExactEquality(nil))
 }
 
 func TestDiffWith_CustomIdentity(t *testing.T) {
