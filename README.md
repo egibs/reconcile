@@ -64,25 +64,44 @@ There are five stages involved in determining a final result containing the file
 goos: linux
 goarch: amd64
 pkg: github.com/egibs/reconcile/pkg/files
-cpu: AMD Ryzen 7 7840U w/ Radeon  780M Graphics     
-BenchmarkHash-16              	14007163	        86.65 ns/op	       0 B/op	       0 allocs/op
-BenchmarkDiff1K-16            	    8116	    143867 ns/op	  236378 B/op	      64 allocs/op
-BenchmarkDiff10K-16           	     553	   2406102 ns/op	 3408597 B/op	     626 allocs/op
-BenchmarkDiff100K-16          	      92	  13295660 ns/op	31153001 B/op	    1841 allocs/op
-BenchmarkDiff1M-16            	       6	 171970322 ns/op	462171509 B/op	   17200 allocs/op
-BenchmarkDiff10M-16           	       1	2893765994 ns/op	3815231432 B/op	  131894 allocs/op
-BenchmarkDiff1M_Workers/w=1-16         	       3	 458755181 ns/op	260652477 B/op	    8240 allocs/op
-BenchmarkDiff1M_Workers/w=2-16         	       3	 495926174 ns/op	260659408 B/op	    8265 allocs/op
-BenchmarkDiff1M_Workers/w=4-16         	       3	 437167420 ns/op	462159512 B/op	   16611 allocs/op
-BenchmarkDiff1M_Workers/w=8-16         	       4	 298978862 ns/op	462157904 B/op	   16805 allocs/op
-BenchmarkDiff1M_Workers/w=16-16        	       6	 199819876 ns/op	462171581 B/op	   17201 allocs/op
-BenchmarkMemory1M-16                   	       6	 179482950 ns/op	       462.2 MB-alloc/op	462171842 B/op	   17203 allocs/op
-BenchmarkSoname-16                     	91837096	        13.72 ns/op	       0 B/op	       0 allocs/op
-BenchmarkScript-16                     	13881259	        86.72 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSuffix-16                     	19892607	        61.89 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEmbedded-16                   	47366329	        25.66 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSpans-16                      	15214172	        75.36 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEqual-16                      	 7907661	       156.9 ns/op	       0 B/op	       0 allocs/op
+cpu: Intel(R) Core(TM) i9-14900K
+BenchmarkHash
+BenchmarkHash-32                14828508                72.18 ns/op            0 B/op          0 allocs/op
+BenchmarkDiff1K
+BenchmarkDiff1K-32                  9660            149458 ns/op          236381 B/op         64 allocs/op
+BenchmarkDiff10K
+BenchmarkDiff10K-32                  458           2540887 ns/op         3408629 B/op        626 allocs/op
+BenchmarkDiff100K
+BenchmarkDiff100K-32                  78          15366147 ns/op        31183166 B/op       2641 allocs/op
+BenchmarkDiff1M
+BenchmarkDiff1M-32                     8         129905718 ns/op        462331910 B/op     18004 allocs/op
+BenchmarkDiff10M
+BenchmarkDiff10M-32                    1        1085729599 ns/op        3815390648 B/op   132687 allocs/op
+BenchmarkDiff1M_Workers
+BenchmarkDiff1M_Workers/w=1
+BenchmarkDiff1M_Workers/w=1-32                 4         270394520 ns/op        260652440 B/op      8240 allocs/op
+BenchmarkDiff1M_Workers/w=2
+BenchmarkDiff1M_Workers/w=2-32                 4         265733210 ns/op        260659464 B/op      8265 allocs/op
+BenchmarkDiff1M_Workers/w=4
+BenchmarkDiff1M_Workers/w=4-32                 4         298481384 ns/op        462159400 B/op     16610 allocs/op
+BenchmarkDiff1M_Workers/w=8
+BenchmarkDiff1M_Workers/w=8-32                 5         214345990 ns/op        462158116 B/op     16807 allocs/op
+BenchmarkDiff1M_Workers/w=16
+BenchmarkDiff1M_Workers/w=16-32                7         150816161 ns/op        462171852 B/op     17204 allocs/op
+BenchmarkMemory1M
+BenchmarkMemory1M-32                           9         120140791 ns/op               462.3 MB-alloc/op        462330873 B/op     17995 allocs/op
+BenchmarkSoname
+BenchmarkSoname-32                      114521086               10.48 ns/op            0 B/op          0 allocs/op
+BenchmarkScript
+BenchmarkScript-32                      16052916                73.51 ns/op            0 B/op          0 allocs/op
+BenchmarkSuffix
+BenchmarkSuffix-32                      22602453                54.67 ns/op            0 B/op          0 allocs/op
+BenchmarkEmbedded
+BenchmarkEmbedded-32                    40496424                25.20 ns/op            0 B/op          0 allocs/op
+BenchmarkSpans
+BenchmarkSpans-32                       14926018                71.73 ns/op            0 B/op          0 allocs/op
+BenchmarkEqual
+BenchmarkEqual-32                        8474408               144.4 ns/op             0 B/op          0 allocs/op
 PASS
-ok  	github.com/egibs/reconcile/pkg/files	33.501s
+ok      github.com/egibs/reconcile/pkg/files    27.420s
 ```
