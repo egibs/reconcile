@@ -83,45 +83,49 @@ Findings so far (Apple M3 Pro, arm64; raw numbers under [SIMD kernels](#simd-ker
 ## Benchmarks
 
 ```
+goos: darwin
+goarch: arm64
+pkg: github.com/egibs/reconcile/pkg/files
+cpu: Apple M4 Max
 BenchmarkHash
-BenchmarkHash-12              	11079291	       107.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkHash-16                16077561                74.59 ns/op            0 B/op          0 allocs/op
 BenchmarkDiff1K
-BenchmarkDiff1K-12            	   10000	    106120 ns/op	  236378 B/op	      64 allocs/op
+BenchmarkDiff1K-16                 13363             92498 ns/op          236378 B/op         64 allocs/op
 BenchmarkDiff10K
-BenchmarkDiff10K-12           	     878	   1345020 ns/op	 3408521 B/op	     626 allocs/op
+BenchmarkDiff10K-16                  919           1307270 ns/op         3408552 B/op        626 allocs/op
 BenchmarkDiff100K
-BenchmarkDiff100K-12          	      78	  13609124 ns/op	31172647 B/op	    1772 allocs/op
+BenchmarkDiff100K-16                  79          12994233 ns/op        31155550 B/op       1841 allocs/op
 BenchmarkDiff1M
-BenchmarkDiff1M-12            	       6	 178736062 ns/op	462201840 B/op	   17132 allocs/op
+BenchmarkDiff1M-16                     8         133556614 ns/op        462173166 B/op     17205 allocs/op
 BenchmarkDiff10M
-BenchmarkDiff10M-12           	       1	2159298666 ns/op	3815294120 B/op	  131822 allocs/op
+BenchmarkDiff10M-16                    1        1443152375 ns/op        3815231432 B/op   131894 allocs/op
 BenchmarkDiff1M_Workers
 BenchmarkDiff1M_Workers/w=1
-BenchmarkDiff1M_Workers/w=1-12         	       3	 337566583 ns/op	260652440 B/op	    8240 allocs/op
+BenchmarkDiff1M_Workers/w=1-16                 5         238474583 ns/op        260652440 B/op      8240 allocs/op
 BenchmarkDiff1M_Workers/w=2
-BenchmarkDiff1M_Workers/w=2-12         	       3	 344974889 ns/op	260659408 B/op	    8265 allocs/op
+BenchmarkDiff1M_Workers/w=2-16                 5         229912208 ns/op        260659408 B/op      8265 allocs/op
 BenchmarkDiff1M_Workers/w=4
-BenchmarkDiff1M_Workers/w=4-12         	       4	 257016729 ns/op	462159344 B/op	   16609 allocs/op
+BenchmarkDiff1M_Workers/w=4-16                 5         210769600 ns/op        462159288 B/op     16609 allocs/op
 BenchmarkDiff1M_Workers/w=8
-BenchmarkDiff1M_Workers/w=8-12         	       6	 204885257 ns/op	462157885 B/op	   16805 allocs/op
+BenchmarkDiff1M_Workers/w=8-16                 6         173165604 ns/op        462157848 B/op     16805 allocs/op
 BenchmarkDiff1M_Workers/w=16
-BenchmarkDiff1M_Workers/w=16-12        	       6	 190847639 ns/op	462171544 B/op	   17201 allocs/op
+BenchmarkDiff1M_Workers/w=16-16                8         134437979 ns/op        462171334 B/op     17199 allocs/op
 BenchmarkMemory1M
-BenchmarkMemory1M-12                   	       6	 188422514 ns/op	       462.2 MB-alloc/op	462201613 B/op	   17130 allocs/op
+BenchmarkMemory1M-16                           8         137126089 ns/op               462.2 MB-alloc/op        462171418 B/op     17199 allocs/op
 BenchmarkSoname
-BenchmarkSoname-12                     	69499412	        17.52 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSoname-16                      100000000               10.75 ns/op            0 B/op          0 allocs/op
 BenchmarkScript
-BenchmarkScript-12                     	16552617	        70.76 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScript-16                      21566571                57.37 ns/op            0 B/op          0 allocs/op
 BenchmarkSuffix
-BenchmarkSuffix-12                     	15586228	        79.45 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSuffix-16                      20436314                58.54 ns/op            0 B/op          0 allocs/op
 BenchmarkEmbedded
-BenchmarkEmbedded-12                   	45074935	        28.27 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEmbedded-16                    62497150                19.86 ns/op            0 B/op          0 allocs/op
 BenchmarkSpans
-BenchmarkSpans-12                      	13420404	        91.22 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSpans-16                       20144973                58.47 ns/op            0 B/op          0 allocs/op
 BenchmarkEqual
-BenchmarkEqual-12                      	 7014228	       170.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEqual-16                       10752061               113.6 ns/op             0 B/op          0 allocs/op
 PASS
-ok  	github.com/egibs/reconcile/pkg/files	27.163s
+ok      github.com/egibs/reconcile/pkg/files    28.424s
 ```
 
 ### SIMD kernels
@@ -134,42 +138,42 @@ paths; the `long` corpora have version tails or dot-free suffixes spanning 16+ b
 goos: darwin
 goarch: arm64
 pkg: github.com/egibs/reconcile/internal/identity
-cpu: Apple M3 Pro
-BenchmarkSIMDSoname/soname/short/scalar-12         	61275747	        19.16 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDSoname/soname/short/archsimd-12       	78407030	        15.13 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDSoname/soname/short/portable-12       	51064915	        23.84 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDSoname/soname/long/scalar-12          	36963642	        31.59 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDSoname/soname/long/archsimd-12        	64179133	        17.37 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDSoname/soname/long/portable-12        	36968244	        31.61 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDEmbedded/embedded/short/scalar-12     	52643794	        22.12 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDEmbedded/embedded/short/archsimd-12   	46898586	        26.29 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDEmbedded/embedded/long/scalar-12      	17107226	        70.56 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDEmbedded/embedded/long/archsimd-12    	30598747	        40.27 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDSuffix/suffix/short/scalar-12         	14726794	        86.79 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDSuffix/suffix/short/archsimd-12       	13921738	        87.31 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDSuffix/suffix/long/scalar-12          	 7341150	       170.8 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDSuffix/suffix/long/archsimd-12        	 7993933	       155.2 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDSpans/spans/short/scalar-12           	34255495	        35.68 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDSpans/spans/short/archsimd-12         	33750211	        35.12 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDSpans/spans/long/scalar-12            	 9939681	       121.3 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDSpans/spans/long/archsimd-12          	15226791	        78.95 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDLastDot/lastdot/short/scalar-12       	99486681	        12.50 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDLastDot/lastdot/short/archsimd-12     	77010700	        15.35 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDLastDot/lastdot/short/portable-12     	55138083	        20.98 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDLastDot/lastdot/long/scalar-12        	48313879	        25.90 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDLastDot/lastdot/long/archsimd-12      	72583939	        16.16 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDLastDot/lastdot/long/portable-12      	31009287	        37.59 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDApplyFlags/scalar-12                  	  540820	      2275 ns/op	28811.59 MB/s	       0 B/op	       0 allocs/op
-BenchmarkSIMDApplyFlags/archsimd-12                	  468980	      2490 ns/op	26319.37 MB/s	       0 B/op	       0 allocs/op
-BenchmarkSIMDApplyFlags/portable-12                	  482306	      2484 ns/op	26383.40 MB/s	       0 B/op	       0 allocs/op
-BenchmarkSIMDUnmarkedScan/marked=10%/perbit-atomic-12         	     856	   1432404 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDUnmarkedScan/marked=10%/word-atomic-12           	    1879	    641020 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDUnmarkedScan/marked=10%/word-scalar-12           	    1771	    682306 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDUnmarkedScan/marked=10%/archsimd-12              	    1810	    665743 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDUnmarkedScan/marked=90%/perbit-atomic-12         	    1087	   1078996 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDUnmarkedScan/marked=90%/word-atomic-12           	   10000	    109124 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDUnmarkedScan/marked=90%/word-scalar-12           	   13555	     86646 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSIMDUnmarkedScan/marked=90%/archsimd-12              	   15385	     76534 ns/op	       0 B/op	       0 allocs/op
+cpu: Apple M4 Max
+BenchmarkSIMDSoname/soname/short/scalar-16              89212245                13.16 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDSoname/soname/short/archsimd-16            100000000               11.92 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDSoname/soname/short/portable-16            64966412                17.75 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDSoname/soname/long/scalar-16               53653064                21.25 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDSoname/soname/long/archsimd-16             90638431                12.79 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDSoname/soname/long/portable-16             48349323                24.24 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDEmbedded/embedded/short/scalar-16          79201604                14.78 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDEmbedded/embedded/short/archsimd-16        62995432                17.75 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDEmbedded/embedded/long/scalar-16           25035684                48.29 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDEmbedded/embedded/long/archsimd-16         39375354                30.66 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDSuffix/suffix/short/scalar-16              18952642                61.31 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDSuffix/suffix/short/archsimd-16            19897651                58.83 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDSuffix/suffix/long/scalar-16                9344050               127.0 ns/op             0 B/op          0 allocs/op
+BenchmarkSIMDSuffix/suffix/long/archsimd-16             11497941               104.1 ns/op             0 B/op          0 allocs/op
+BenchmarkSIMDSpans/spans/short/scalar-16                50430850                25.16 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDSpans/spans/short/archsimd-16              48180272                24.18 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDSpans/spans/long/scalar-16                 13365639                90.06 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDSpans/spans/long/archsimd-16               19618982                60.20 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDLastDot/lastdot/short/scalar-16            175173360                6.880 ns/op           0 B/op          0 allocs/op
+BenchmarkSIMDLastDot/lastdot/short/archsimd-16          100000000               11.23 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDLastDot/lastdot/short/portable-16          79528791                15.16 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDLastDot/lastdot/long/scalar-16             66146679                18.46 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDLastDot/lastdot/long/archsimd-16           100000000               11.27 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDLastDot/lastdot/long/portable-16           39370401                29.73 ns/op            0 B/op          0 allocs/op
+BenchmarkSIMDApplyFlags/scalar-16                         643334              1718 ns/op        38155.28 MB/s          0 B/op          0 allocs/op
+BenchmarkSIMDApplyFlags/archsimd-16                       669909              1739 ns/op        37689.94 MB/s          0 B/op          0 allocs/op
+BenchmarkSIMDApplyFlags/portable-16                       603830              1874 ns/op        34963.21 MB/s          0 B/op          0 allocs/op
+BenchmarkSIMDUnmarkedScan/marked=10%/perbit-atomic-16               1018           1170888 ns/op               0 B/op          0 allocs/op
+BenchmarkSIMDUnmarkedScan/marked=10%/word-atomic-16                 2156            562929 ns/op               0 B/op          0 allocs/op
+BenchmarkSIMDUnmarkedScan/marked=10%/word-scalar-16                 2118            568950 ns/op               0 B/op          0 allocs/op
+BenchmarkSIMDUnmarkedScan/marked=10%/archsimd-16                    2133            569958 ns/op               0 B/op          0 allocs/op
+BenchmarkSIMDUnmarkedScan/marked=90%/perbit-atomic-16               1321            913543 ns/op               0 B/op          0 allocs/op
+BenchmarkSIMDUnmarkedScan/marked=90%/word-atomic-16                10000            103951 ns/op               0 B/op          0 allocs/op
+BenchmarkSIMDUnmarkedScan/marked=90%/word-scalar-16                16417             72122 ns/op               0 B/op          0 allocs/op
+BenchmarkSIMDUnmarkedScan/marked=90%/archsimd-16                   19692             56927 ns/op               0 B/op          0 allocs/op
 PASS
-ok  	github.com/egibs/reconcile/internal/identity	42.350s
+ok      github.com/egibs/reconcile/internal/identity    41.278s
 ```
