@@ -333,6 +333,85 @@ func TestDiff_LargeScale(t *testing.T) {
 	}
 }
 
+// TestDiffAdditionsWordBoundaries pins the additions scan at and around
+// 64-bit claim-bitset word boundaries: matched cur files come from identical
+// old names, everything else must surface as Added in ascending order, and
+// results must not depend on the worker count.
+func TestDiffAdditionsWordBoundaries(t *testing.T) {
+	everyThird := func(n int) []int {
+		var idx []int
+		for i := 0; i < n; i += 3 {
+			idx = append(idx, i)
+		}
+		return idx
+	}
+	all := func(n int) []int {
+		idx := make([]int, n)
+		for i := range idx {
+			idx[i] = i
+		}
+		return idx
+	}
+
+	tests := []struct {
+		name     string
+		curCount int
+		matched  []int
+	}{
+		{"single file added", 1, nil},
+		{"single file matched", 1, []int{0}},
+		{"matches astride first word boundary", 65, []int{62, 63, 64}},
+		{"all matched across words", 129, all(129)},
+		{"none matched across words", 129, nil},
+		{"scattered matches at word edges", 130, []int{0, 62, 63, 64, 65, 127, 128, 129}},
+		{"multi-chunk parallel scan", 8195, everyThird(8195)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Names carry no version pattern, so identities never collide
+			// and unmatched cur files can only ever be additions.
+			cur := make([]string, tt.curCount)
+			for i := range cur {
+				cur[i] = fmt.Sprintf("f_%d", i)
+			}
+			old := make([]string, 0, len(tt.matched))
+			isMatched := make(map[int]struct{}, len(tt.matched))
+			for _, i := range tt.matched {
+				old = append(old, cur[i])
+				isMatched[i] = struct{}{}
+			}
+
+			reference := diffP(old, cur, 1)
+			for _, workers := range []int{1, 2, 4, 16} {
+				r := diffP(old, cur, workers)
+
+				if got, want := int(r.Count(Added)), tt.curCount-len(tt.matched); got != want {
+					t.Fatalf("w=%d: Count(Added) = %d, want %d", workers, got, want)
+				}
+				if got, want := int(r.Count(Unchanged)), len(tt.matched); got != want {
+					t.Fatalf("w=%d: Count(Unchanged) = %d, want %d", workers, got, want)
+				}
+
+				prev := -1
+				for e := range r.Filter(Added) {
+					if _, ok := isMatched[int(e.New)]; ok {
+						t.Fatalf("w=%d: matched cur index %d reported as Added", workers, e.New)
+					}
+					if int(e.New) <= prev {
+						t.Fatalf("w=%d: additions out of order: %d after %d", workers, e.New, prev)
+					}
+					prev = int(e.New)
+				}
+
+				if !slices.Equal(r.E, reference.E) {
+					t.Fatalf("w=%d: entries differ from single-worker result", workers)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkHash(b *testing.B) {
 	paths := []string{
 		"libfoo.so.1.2.3",

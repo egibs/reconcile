@@ -2,6 +2,7 @@ package files
 
 import (
 	"hash/maphash"
+	"math/bits"
 	"runtime"
 	"slices"
 	"sync"
@@ -270,15 +271,26 @@ func diffPWith(old, cur []string, workers int, cfg *config) *Result {
 		unchanged, updated = reconcileParallel(old, cur, oldEx, oldID, oldShards, curShards, shardMask, matches, oldEntries, cfg, workers)
 	}
 
-	// Unclaimed cur files are additions. Chunk ordinals keep additions in
-	// ascending cur-index order for deterministic output.
+	// Unclaimed cur files are additions. The claim bitset is complete once
+	// the reconcile passes return, so workers chunk over whole words and
+	// walk each word's zero bits with one load per 64 files instead of one
+	// per file. Only the final word carries bits at or beyond newFiles, so
+	// the bound check can end that word's walk early. Chunk ordinals keep
+	// additions in ascending cur-index order for deterministic output.
+	newFiles32 := uint32(newFiles) // #nosec G115 -- guarded above
 	additions := make([][]Entry, workers)
-	identity.ParallelChunks(newFiles, workers, func(w, low, high int) {
-		entries := make([]Entry, 0, (high-low)/4)
-		for i := low; i < high; i++ {
-			fileIdx := uint32(i) // #nosec G115 -- guarded above
-			if !identity.IsMarked(matches, fileIdx) {
+	identity.ParallelChunks(len(matches), workers, func(w, low, high int) {
+		entries := make([]Entry, 0, (high-low)<<4)
+		for wi := low; wi < high; wi++ {
+			m := ^matches[wi].Load()
+			base := uint32(wi) << 6 // #nosec G115 -- word count is bounded by the input length guard
+			for m != 0 {
+				fileIdx := base + uint32(bits.TrailingZeros64(m)) // #nosec G115 -- TrailingZeros64 <= 64
+				if fileIdx >= newFiles32 {
+					break
+				}
 				entries = append(entries, Entry{null, fileIdx, Added})
+				m &= m - 1
 			}
 		}
 		additions[w] = entries

@@ -58,50 +58,118 @@ There are five stages involved in determining a final result containing the file
 1. The identity pass claims remaining same-identity pairs as `Updated`; unmatched old files are `Removed`.
 1. Unmatched new files are marked `Added` and the entries are merged into a final result type.
 
+## SIMD (experimental)
+
+`internal/identity` carries `simd/archsimd` (Go 1.27, `GOEXPERIMENT=simd`) variants of its
+byte-scan kernels for amd64 (AVX) and arm64 (Neon), plus portable `simd` fallbacks. The files
+are build-tagged on `goexperiment.simd`, so normal builds are unaffected; `make test-simd`
+cross-checks every kernel against its scalar counterpart and `make bench-simd` compares them.
+
+Findings so far (Apple M3 Pro, arm64; raw numbers under [SIMD kernels](#simd-kernels)):
+
+- Vector classification wins on names whose version tails or dot-free suffixes span 16+ bytes
+  (up to 2x on `Soname`, 1.7x on `Embedded`), and loses slightly on short names where the
+  fixed mask-extraction cost exceeds the few scalar iterations it replaces.
+- The `Suffix` version-segment walk is a sequential state machine and does not vectorize.
+- The flag-application ops (`&^`/`|` over hash slices) are memory-bound; scalar, archsimd,
+  and portable simd all run at identical throughput.
+- The additions scan was the largest opportunity, and it did not need SIMD: `Diff` now scans
+  the claim bitset a word at a time (`word-atomic` below), beating the previous per-bit
+  atomic loads by 2x (10% claimed) to 10x (90% claimed) on that stage; a 128-bit archsimd
+  skip would add ~30% more only in claim-heavy cases.
+- The portable `simd` package exposes no mask-to-bitmask conversion, so position extraction
+  spills lanes through memory and generally runs at or below scalar speed for these scans.
+
 ## Benchmarks
 
 ```
-goos: linux
-goarch: amd64
-pkg: github.com/egibs/reconcile/pkg/files
-cpu: Intel(R) Core(TM) i9-14900K
 BenchmarkHash
-BenchmarkHash-32                14828508                72.18 ns/op            0 B/op          0 allocs/op
+BenchmarkHash-12              	11079291	       107.1 ns/op	       0 B/op	       0 allocs/op
 BenchmarkDiff1K
-BenchmarkDiff1K-32                  9660            149458 ns/op          236381 B/op         64 allocs/op
+BenchmarkDiff1K-12            	   10000	    106120 ns/op	  236378 B/op	      64 allocs/op
 BenchmarkDiff10K
-BenchmarkDiff10K-32                  458           2540887 ns/op         3408629 B/op        626 allocs/op
+BenchmarkDiff10K-12           	     878	   1345020 ns/op	 3408521 B/op	     626 allocs/op
 BenchmarkDiff100K
-BenchmarkDiff100K-32                  78          15366147 ns/op        31183166 B/op       2641 allocs/op
+BenchmarkDiff100K-12          	      78	  13609124 ns/op	31172647 B/op	    1772 allocs/op
 BenchmarkDiff1M
-BenchmarkDiff1M-32                     8         129905718 ns/op        462331910 B/op     18004 allocs/op
+BenchmarkDiff1M-12            	       6	 178736062 ns/op	462201840 B/op	   17132 allocs/op
 BenchmarkDiff10M
-BenchmarkDiff10M-32                    1        1085729599 ns/op        3815390648 B/op   132687 allocs/op
+BenchmarkDiff10M-12           	       1	2159298666 ns/op	3815294120 B/op	  131822 allocs/op
 BenchmarkDiff1M_Workers
 BenchmarkDiff1M_Workers/w=1
-BenchmarkDiff1M_Workers/w=1-32                 4         270394520 ns/op        260652440 B/op      8240 allocs/op
+BenchmarkDiff1M_Workers/w=1-12         	       3	 337566583 ns/op	260652440 B/op	    8240 allocs/op
 BenchmarkDiff1M_Workers/w=2
-BenchmarkDiff1M_Workers/w=2-32                 4         265733210 ns/op        260659464 B/op      8265 allocs/op
+BenchmarkDiff1M_Workers/w=2-12         	       3	 344974889 ns/op	260659408 B/op	    8265 allocs/op
 BenchmarkDiff1M_Workers/w=4
-BenchmarkDiff1M_Workers/w=4-32                 4         298481384 ns/op        462159400 B/op     16610 allocs/op
+BenchmarkDiff1M_Workers/w=4-12         	       4	 257016729 ns/op	462159344 B/op	   16609 allocs/op
 BenchmarkDiff1M_Workers/w=8
-BenchmarkDiff1M_Workers/w=8-32                 5         214345990 ns/op        462158116 B/op     16807 allocs/op
+BenchmarkDiff1M_Workers/w=8-12         	       6	 204885257 ns/op	462157885 B/op	   16805 allocs/op
 BenchmarkDiff1M_Workers/w=16
-BenchmarkDiff1M_Workers/w=16-32                7         150816161 ns/op        462171852 B/op     17204 allocs/op
+BenchmarkDiff1M_Workers/w=16-12        	       6	 190847639 ns/op	462171544 B/op	   17201 allocs/op
 BenchmarkMemory1M
-BenchmarkMemory1M-32                           9         120140791 ns/op               462.3 MB-alloc/op        462330873 B/op     17995 allocs/op
+BenchmarkMemory1M-12                   	       6	 188422514 ns/op	       462.2 MB-alloc/op	462201613 B/op	   17130 allocs/op
 BenchmarkSoname
-BenchmarkSoname-32                      114521086               10.48 ns/op            0 B/op          0 allocs/op
+BenchmarkSoname-12                     	69499412	        17.52 ns/op	       0 B/op	       0 allocs/op
 BenchmarkScript
-BenchmarkScript-32                      16052916                73.51 ns/op            0 B/op          0 allocs/op
+BenchmarkScript-12                     	16552617	        70.76 ns/op	       0 B/op	       0 allocs/op
 BenchmarkSuffix
-BenchmarkSuffix-32                      22602453                54.67 ns/op            0 B/op          0 allocs/op
+BenchmarkSuffix-12                     	15586228	        79.45 ns/op	       0 B/op	       0 allocs/op
 BenchmarkEmbedded
-BenchmarkEmbedded-32                    40496424                25.20 ns/op            0 B/op          0 allocs/op
+BenchmarkEmbedded-12                   	45074935	        28.27 ns/op	       0 B/op	       0 allocs/op
 BenchmarkSpans
-BenchmarkSpans-32                       14926018                71.73 ns/op            0 B/op          0 allocs/op
+BenchmarkSpans-12                      	13420404	        91.22 ns/op	       0 B/op	       0 allocs/op
 BenchmarkEqual
-BenchmarkEqual-32                        8474408               144.4 ns/op             0 B/op          0 allocs/op
+BenchmarkEqual-12                      	 7014228	       170.4 ns/op	       0 B/op	       0 allocs/op
 PASS
-ok      github.com/egibs/reconcile/pkg/files    27.420s
+ok  	github.com/egibs/reconcile/pkg/files	27.163s
+```
+
+### SIMD kernels
+
+`make bench-simd` results comparing the scalar kernels against their `simd/archsimd` and
+portable `simd` variants (`GOEXPERIMENT=simd`). The `short` corpora are typical package
+paths; the `long` corpora have version tails or dot-free suffixes spanning 16+ bytes.
+
+```
+goos: darwin
+goarch: arm64
+pkg: github.com/egibs/reconcile/internal/identity
+cpu: Apple M3 Pro
+BenchmarkSIMDSoname/soname/short/scalar-12         	61275747	        19.16 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDSoname/soname/short/archsimd-12       	78407030	        15.13 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDSoname/soname/short/portable-12       	51064915	        23.84 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDSoname/soname/long/scalar-12          	36963642	        31.59 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDSoname/soname/long/archsimd-12        	64179133	        17.37 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDSoname/soname/long/portable-12        	36968244	        31.61 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDEmbedded/embedded/short/scalar-12     	52643794	        22.12 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDEmbedded/embedded/short/archsimd-12   	46898586	        26.29 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDEmbedded/embedded/long/scalar-12      	17107226	        70.56 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDEmbedded/embedded/long/archsimd-12    	30598747	        40.27 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDSuffix/suffix/short/scalar-12         	14726794	        86.79 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDSuffix/suffix/short/archsimd-12       	13921738	        87.31 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDSuffix/suffix/long/scalar-12          	 7341150	       170.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDSuffix/suffix/long/archsimd-12        	 7993933	       155.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDSpans/spans/short/scalar-12           	34255495	        35.68 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDSpans/spans/short/archsimd-12         	33750211	        35.12 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDSpans/spans/long/scalar-12            	 9939681	       121.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDSpans/spans/long/archsimd-12          	15226791	        78.95 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDLastDot/lastdot/short/scalar-12       	99486681	        12.50 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDLastDot/lastdot/short/archsimd-12     	77010700	        15.35 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDLastDot/lastdot/short/portable-12     	55138083	        20.98 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDLastDot/lastdot/long/scalar-12        	48313879	        25.90 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDLastDot/lastdot/long/archsimd-12      	72583939	        16.16 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDLastDot/lastdot/long/portable-12      	31009287	        37.59 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDApplyFlags/scalar-12                  	  540820	      2275 ns/op	28811.59 MB/s	       0 B/op	       0 allocs/op
+BenchmarkSIMDApplyFlags/archsimd-12                	  468980	      2490 ns/op	26319.37 MB/s	       0 B/op	       0 allocs/op
+BenchmarkSIMDApplyFlags/portable-12                	  482306	      2484 ns/op	26383.40 MB/s	       0 B/op	       0 allocs/op
+BenchmarkSIMDUnmarkedScan/marked=10%/perbit-atomic-12         	     856	   1432404 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDUnmarkedScan/marked=10%/word-atomic-12           	    1879	    641020 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDUnmarkedScan/marked=10%/word-scalar-12           	    1771	    682306 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDUnmarkedScan/marked=10%/archsimd-12              	    1810	    665743 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDUnmarkedScan/marked=90%/perbit-atomic-12         	    1087	   1078996 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDUnmarkedScan/marked=90%/word-atomic-12           	   10000	    109124 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDUnmarkedScan/marked=90%/word-scalar-12           	   13555	     86646 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSIMDUnmarkedScan/marked=90%/archsimd-12              	   15385	     76534 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/egibs/reconcile/internal/identity	42.350s
 ```
