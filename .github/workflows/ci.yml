@@ -60,6 +60,49 @@ jobs:
         run: |
           make test-win
 
+  # Exercises the experimental GOEXPERIMENT=simd kernels on both amd64 and
+  # arm64; these files are excluded from every other job's build.
+  test-simd:
+    if: ${{ github.repository == 'egibs/reconcile' }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          [
+            "macos-15-intel",
+            "macos-latest",
+            "ubuntu-24.04-arm",
+            "ubuntu-latest",
+          ]
+    steps:
+      - uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            proxy.golang.org:443
+            release-assets.githubusercontent.com:443
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: "go.mod"
+          check-latest: true
+          cache: true
+
+      - name: Run SIMD Tests
+        run: |
+          make test-simd
+
   bench:
     if: ${{ github.repository == 'egibs/reconcile' }}
     runs-on: ${{ matrix.os }}
@@ -221,9 +264,15 @@ jobs:
           check-latest: true
           cache: true
 
+      # The fuzz target reaches the run block via an environment variable so
+      # template expansion can never inject code into the shell (zizmor
+      # template-injection). bash keeps the expansion portable on Windows.
       - name: Run ${{ matrix.test }}
+        env:
+          FUZZ_TARGET: ${{ matrix.test }}
+        shell: bash
         run: |
-          go test -parallel=1 -fuzz='^${{ matrix.test }}$' -run='^${{ matrix.test }}$' -fuzztime=10s ./pkg/files
+          go test -parallel=1 -fuzz="^${FUZZ_TARGET}$" -run="^${FUZZ_TARGET}$" -fuzztime=10s ./pkg/files
 
       # Fuzz-found failures write a minimized reproducer to testdata/fuzz on
       # the ephemeral runner; upload it so the failing input survives the job.

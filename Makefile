@@ -24,6 +24,16 @@ test-win: clean
 bench: clean
 	go test -v -run=^\$$ -bench=. ./... -benchmem
 
+# The SIMD targets build with GOEXPERIMENT=simd to exercise the experimental
+# simd/archsimd kernels in internal/identity; they are inert in normal builds.
+.PHONY: test-simd
+test-simd: clean
+	GOEXPERIMENT=simd go test -count=1 -race ./internal/identity/
+
+.PHONY: bench-simd
+bench-simd: clean
+	GOEXPERIMENT=simd go test -run=^\$$ -bench=^BenchmarkSIMD -benchmem ./internal/identity/
+
 .PHONY: lint
 lint: _lint
 
@@ -37,7 +47,7 @@ FIXERS :=
 
 # Tool versions. Everything is pinned (including the install script ref
 # below) so lint-gate behavior only changes with a repo diff.
-GOLANGCI_LINT_VERSION ?= v2.12.2
+GOLANGCI_LINT_VERSION ?= v2.13.0
 GOSEC_VERSION ?= v2.27.1
 MODERNIZE_VERSION ?= v0.48.0
 OSV_SCANNER_VERSION ?= v2.4.0
